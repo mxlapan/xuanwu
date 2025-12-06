@@ -1,7 +1,7 @@
 {
   "log": {
-    "loglevel": "warning",
-    "access": "none",
+    "loglevel": "info",
+    "access": "/var/log/xray/access.log",
     "error": ""
   },
   "stats": {},

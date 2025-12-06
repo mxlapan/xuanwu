@@ -8,6 +8,7 @@ services:
     volumes:
       - ./xray/config.json:/etc/xray/config.json:ro
       - ./certs:/etc/xray/certs:ro
+      - ./logs/xray:/var/log/xray
     command: ["run", "-c", "/etc/xray/config.json"]
     networks:
       - vless-net

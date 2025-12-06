@@ -7,3 +7,5 @@ certs/
 
 *.log
 *.zip
+
+logs/

@@ -256,6 +256,10 @@ optimize_system() {
 start_services() {
     print_info "Starting services..."
     cd "$SCRIPT_DIR"
+
+    mkdir -p "$SCRIPT_DIR/logs/xray"
+    chmod 777 "$SCRIPT_DIR/logs/xray"
+
     docker_compose down 2>/dev/null || true
     docker_compose up -d
     sleep 3
