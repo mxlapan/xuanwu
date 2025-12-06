@@ -1,0 +1,9 @@
+.env
+
+xray/config.json
+nginx/nginx.conf
+
+certs/
+
+*.log
+*.zip

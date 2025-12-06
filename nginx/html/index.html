@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Professional cloud services and solutions for modern businesses.">
+    <meta name="keywords" content="cloud, services, technology, solutions">
+    <title>CloudTech Solutions - Enterprise Cloud Services</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+            line-height: 1.6;
+        }
+        header {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 0;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .nav-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #667eea;
+        }
+        nav a {
+            color: #555;
+            text-decoration: none;
+            margin-left: 30px;
+            font-weight: 500;
+            transition: color 0.3s;
+        }
+        nav a:hover { color: #667eea; }
+        .hero {
+            padding: 100px 20px;
+            text-align: center;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 60px 40px;
+            max-width: 900px;
+            margin: 0 auto;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        }
+        h1 {
+            color: #1a202c;
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+        }
+        .subtitle {
+            color: #4a5568;
+            font-size: 1.2rem;
+            margin-bottom: 40px;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 30px;
+            margin: 40px 0;
+        }
+        .feature {
+            text-align: center;
+            padding: 30px 20px;
+            background: #f7fafc;
+            border-radius: 12px;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .feature:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+        .feature-icon {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+        }
+        .feature h3 {
+            color: #2d3748;
+            margin-bottom: 10px;
+        }
+        .feature p {
+            color: #718096;
+            font-size: 0.95rem;
+        }
+        .status {
+            display: inline-flex;
+            align-items: center;
+            background: #e6fffa;
+            color: #234e52;
+            padding: 10px 20px;
+            border-radius: 50px;
+            margin-top: 30px;
+        }
+        .status::before {
+            content: '';
+            width: 10px;
+            height: 10px;
+            background: #38b2ac;
+            border-radius: 50%;
+            margin-right: 10px;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        footer {
+            text-align: center;
+            padding: 30px;
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 0.9rem;
+        }
+        footer a { color: rgba(255, 255, 255, 0.9); }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="nav-container">
+            <div class="logo">☁️ CloudTech</div>
+            <nav>
+                <a href="/">Home</a>
+                <a href="/about.html">About</a>
+                <a href="/services.html">Services</a>
+                <a href="/contact.html">Contact</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="hero">
+        <div class="container">
+            <h1>Enterprise Cloud Solutions</h1>
+            <p class="subtitle">Empowering businesses with scalable, secure, and reliable cloud infrastructure.</p>
+
+            <div class="features">
+                <div class="feature">
+                    <div class="feature-icon">🚀</div>
+                    <h3>High Performance</h3>
+                    <p>Blazing fast infrastructure with 99.99% uptime guarantee.</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">🔒</div>
+                    <h3>Security First</h3>
+                    <p>Enterprise-grade security with end-to-end encryption.</p>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">📈</div>
+                    <h3>Scalability</h3>
+                    <p>Automatically scale resources based on your needs.</p>
+                </div>
+            </div>
+
+            <div class="status">All Systems Operational</div>
+        </div>
+    </div>
+
+    <footer>
+        <p>&copy; 2024 CloudTech Solutions. All rights reserved. | <a href="/privacy.html">Privacy Policy</a></p>
+    </footer>
+</body>
+</html>
