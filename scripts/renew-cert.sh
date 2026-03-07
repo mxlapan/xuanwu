@@ -38,17 +38,20 @@ log "Renewing certificate..."
 
 cd "$INSTALL_DIR"
 
-docker compose stop xray 2>/dev/null || docker-compose stop xray
+docker compose down 2>/dev/null || docker-compose down
 
 docker run --rm \
     -v "$INSTALL_DIR/certs:/etc/letsencrypt" \
-    -p 443:443 \
+    -p 80:80 \
     certbot/certbot renew --standalone --non-interactive
 
 if [[ -f "$INSTALL_DIR/certs/live/$DOMAIN/fullchain.pem" ]]; then
     cp "$INSTALL_DIR/certs/live/$DOMAIN/fullchain.pem" "$INSTALL_DIR/certs/fullchain.pem"
     cp "$INSTALL_DIR/certs/live/$DOMAIN/privkey.pem" "$INSTALL_DIR/certs/privkey.pem"
+    chmod 644 "$INSTALL_DIR/certs/fullchain.pem" "$INSTALL_DIR/certs/privkey.pem"
     log "Certificate renewed"
+else
+    log "Error: Renewal failed, certificate files not found"
 fi
 
 docker compose up -d 2>/dev/null || docker-compose up -d
