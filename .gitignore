@@ -1,11 +1,17 @@
 .env
+.env.telegram
 
 xray/config.json
 nginx/nginx.conf
 
 certs/
+data/
+backups/
 
 *.log
 *.zip
 
 logs/
+
+tmp/
+.telegram-bot.lock/

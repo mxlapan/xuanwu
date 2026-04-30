@@ -1,10 +1,19 @@
 services:
   xray:
-    image: ghcr.io/xtls/xray-core:latest
+    image: ${XRAY_IMAGE:-ghcr.io/xtls/xray-core:26.4.17}
     container_name: xray
     restart: always
-    ports:
-      - "443:443"
+    user: "0:0"
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "10443"
+      - "10444"
+      - "10085"
     volumes:
       - ./xray/config.json:/etc/xray/config.json:ro
       - ./certs:/etc/xray/certs:ro
@@ -12,9 +21,6 @@ services:
     command: ["run", "-c", "/etc/xray/config.json"]
     networks:
       - vless-net
-    depends_on:
-      nginx:
-        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -35,16 +41,35 @@ services:
         max-file: "3"
 
   nginx:
-    image: nginx:alpine
-    container_name: nginx-fallback
+    image: ${NGINX_IMAGE:-nginx:1.29.8-alpine}
+    container_name: nginx-edge
     restart: always
+    ports:
+      - "443:443"
     expose:
       - "8080"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/html:/usr/share/nginx/html:ro
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        conf=/etc/nginx/nginx.conf
+        if [ -f /etc/nginx/modules/ngx_stream_module.so ]; then
+          sed '1iload_module modules/ngx_stream_module.so;' "$$conf" > /tmp/nginx.conf
+          conf=/tmp/nginx.conf
+        elif [ -f /usr/lib/nginx/modules/ngx_stream_module.so ]; then
+          sed '1iload_module /usr/lib/nginx/modules/ngx_stream_module.so;' "$$conf" > /tmp/nginx.conf
+          conf=/tmp/nginx.conf
+        fi
+        exec nginx -c "$$conf" -g 'daemon off;'
     networks:
       - vless-net
+    depends_on:
+      xray:
+        condition: service_started
     deploy:
       resources:
         limits:

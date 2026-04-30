@@ -9,6 +9,35 @@ events {
     multi_accept on;
 }
 
+stream {
+    log_format stream_proxy '$remote_addr [$time_local] '
+                            '$protocol $status $bytes_sent $bytes_received '
+                            '$session_time "$ssl_preread_server_name" -> "$upstream_addr"';
+    access_log /var/log/nginx/stream-access.log stream_proxy;
+
+    upstream xray_tls_vision {
+        server xray:10444;
+    }
+
+    upstream xray_reality_vision {
+        server xray:10443;
+    }
+
+    map $ssl_preread_server_name $vxd_stream_backend {
+        {{REALITY_SERVER_NAME}} xray_reality_vision;
+        default xray_tls_vision;
+    }
+
+    server {
+        listen 443;
+        listen [::]:443;
+        proxy_pass $vxd_stream_backend;
+        ssl_preread on;
+        proxy_connect_timeout 5s;
+        proxy_timeout 1h;
+    }
+}
+
 http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;

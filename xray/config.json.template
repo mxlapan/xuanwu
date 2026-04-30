@@ -36,7 +36,7 @@
     {
       "tag": "vless-xtls-vision",
       "listen": "0.0.0.0",
-      "port": 443,
+      "port": 10444,
       "protocol": "vless",
       "settings": {
         "clients": [
@@ -69,6 +69,40 @@
               "keyFile": "/etc/xray/certs/privkey.pem"
             }
           ]
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"],
+        "routeOnly": true
+      }
+    },
+    {
+      "tag": "vless-reality-vision",
+      "listen": "0.0.0.0",
+      "port": 10443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "{{UUID}}",
+            "email": "user1@{{DOMAIN}}",
+            "flow": "xtls-rprx-vision",
+            "level": 0
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "dest": "{{REALITY_DEST}}",
+          "xver": 0,
+          "serverNames": ["{{REALITY_SERVER_NAME}}"],
+          "privateKey": "{{REALITY_PRIVATE_KEY}}",
+          "shortIds": ["{{REALITY_SHORT_ID}}"]
         }
       },
       "sniffing": {

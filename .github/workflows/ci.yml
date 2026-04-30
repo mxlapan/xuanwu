@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install validation tools
+        run: sudo apt-get update && sudo apt-get install -y shellcheck jq
+      - name: Bash syntax
+        run: bash -n deploy.sh scripts/*.sh scripts/lib/*.sh
+      - name: ShellCheck
+        run: shellcheck -x -S error deploy.sh scripts/*.sh scripts/lib/*.sh
+      - name: Docker Compose config
+        run: docker compose config --quiet
+      - name: Template JSON sanity
+        run: |
+          sed -e 's/{{UUID}}/00000000-0000-0000-0000-000000000000/g' -e 's/{{DOMAIN}}/example.com/g' xray/config.json.template | jq empty
