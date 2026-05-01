@@ -5,6 +5,9 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$(dirname "$SCRIPT_DIR")"
 COMMON_LIB="$INSTALL_DIR/scripts/lib/common.sh"
+if grep -q $'\r' "$COMMON_LIB" 2>/dev/null; then
+    sed -i 's/\r$//' "$COMMON_LIB" 2>/dev/null || true
+fi
 # shellcheck source=scripts/lib/common.sh
 source "$COMMON_LIB"
 
@@ -709,6 +712,10 @@ cmd_config() {
 cmd_traffic() {
     local chat_id="$1" ident="${2:-}"
     runtime_ready || { send_message "$chat_id" "⚠️ 运行配置未就绪。"; return; }
+    local sync_warning=""
+    if ! vxd_update_traffic_usage; then
+        sync_warning="⚠️ 本次实时同步失败，以下为上次保存的数据。\n\n"
+    fi
     local filter="" user body="" tag used limit percent status updated limit_text count=0
     if [[ -n "$ident" ]]; then
         user="$(vxd_user_find "$ident")"
@@ -734,11 +741,11 @@ cmd_traffic() {
     done < <(vxd_traffic_table)
 
     if [[ $count -eq 0 ]]; then
-        send_message "$chat_id" "📈 <b>流量统计</b>
+        send_message "$chat_id" "${sync_warning}📈 <b>流量统计</b>
 
 暂无数据。"
     else
-        send_message "$chat_id" "📈 <b>流量统计</b>｜共 <code>$count</code> 个
+        send_message "$chat_id" "${sync_warning}📈 <b>流量统计</b>｜共 <code>$count</code> 个
 
 $body"
     fi

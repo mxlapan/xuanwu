@@ -335,11 +335,20 @@ vxd_ensure_dirs() {
     chmod 700 "$VXD_LOG_DIR/telegram-bot" "$VXD_USER_LOG_DIR" 2>/dev/null || true
 }
 
+vxd_cleanup_user_db_temps() {
+    [[ -d "$VXD_DATA_DIR" ]] || return 0
+    find "$VXD_DATA_DIR" -maxdepth 1 -type f \
+        \( -name 'users.json.tmp.*' -o -name 'users.json.migrate.*' -o -name 'users.json.repair.*' \) \
+        -delete 2>/dev/null || true
+}
+
 vxd_migrate_user_db() {
     [[ -f "$VXD_USERS_DB" ]] || return 0
     local tmp
     tmp="$(mktemp "$VXD_USERS_DB.migrate.XXXXXX")"
-    jq --arg now "$(vxd_now)" '
+    if ! jq --arg now "$(vxd_now)" '
+      if type == "array" then {users:.} else . end |
+      .users = (.users // []) |
       .users |= map(
         .traffic_limit_bytes = ((.traffic_limit_bytes // 0) | tonumber) |
         .traffic_used_bytes = ((.traffic_used_bytes // 0) | tonumber) |
@@ -348,17 +357,140 @@ vxd_migrate_user_db() {
         .traffic_limited_at = (.traffic_limited_at // "") |
         .updated_at = (.updated_at // $now)
       )
-    ' "$VXD_USERS_DB" > "$tmp" && mv "$tmp" "$VXD_USERS_DB"
+    ' "$VXD_USERS_DB" > "$tmp"; then
+        rm -f "$tmp"
+        return 1
+    fi
+    mv "$tmp" "$VXD_USERS_DB" || { rm -f "$tmp"; return 1; }
     chmod 600 "$VXD_USERS_DB"
+}
+
+vxd_user_db_is_valid() {
+    [[ -f "$VXD_USERS_DB" ]] && jq -e '((type == "object") and ((.users // []) | type == "array")) or (type == "array")' "$VXD_USERS_DB" >/dev/null 2>&1
+}
+
+vxd_repair_user_db() {
+    [[ -f "$VXD_USERS_DB" ]] || return 0
+    vxd_load_main_config || true
+
+    local now domain admin_tag limit tmp
+    now="$(vxd_now)"
+    domain="${DOMAIN:-example.com}"
+    admin_tag="${ADMIN_USER_TAG:-$VXD_DEFAULT_ADMIN_USER_TAG}"
+    limit="$(vxd_parse_bytes "${TRAFFIC_DEFAULT_LIMIT:-$VXD_DEFAULT_TRAFFIC_LIMIT}" 2>/dev/null || echo 0)"
+
+    if [[ -n "${UUID:-}" ]] && ! jq -e --arg tag "$admin_tag" --arg uuid "$UUID" 'any((.users // [])[]?; (.tag == $tag) or (.uuid == $uuid))' "$VXD_USERS_DB" >/dev/null 2>&1; then
+        tmp="$(mktemp "$VXD_USERS_DB.repair.XXXXXX")"
+        if ! jq --arg tag "$admin_tag" --arg uuid "$UUID" --arg domain "$domain" --arg now "$now" '
+          .users = (.users // []) |
+          .users += [{
+            tag:$tag,
+            uuid:$uuid,
+            email:($tag+"@"+$domain),
+            enabled:true,
+            expire_at:"",
+            remark:"admin user (unlimited)",
+            traffic_limit_bytes:0,
+            traffic_used_bytes:0,
+            traffic_auto_disable:false,
+            traffic_updated_at:"",
+            traffic_limited_at:"",
+            created_at:$now,
+            updated_at:$now
+          }]
+        ' "$VXD_USERS_DB" > "$tmp"; then
+            rm -f "$tmp"
+            return 1
+        fi
+        mv "$tmp" "$VXD_USERS_DB" || { rm -f "$tmp"; return 1; }
+    fi
+
+    if [[ -f "$VXD_XRAY_CONFIG" ]] && jq -e . "$VXD_XRAY_CONFIG" >/dev/null 2>&1; then
+        tmp="$(mktemp "$VXD_USERS_DB.repair.XXXXXX")"
+        if ! jq \
+          --slurpfile xray "$VXD_XRAY_CONFIG" \
+          --arg tls_tag "$VXD_XRAY_INBOUND_TAG" \
+          --arg reality_tag "$VXD_REALITY_INBOUND_TAG" \
+          --arg domain "$domain" \
+          --arg admin "$admin_tag" \
+          --arg now "$now" \
+          --argjson limit "$limit" '
+          def client_tag:
+            if ((.email // "") | length) > 0 then ((.email // "") | split("@")[0])
+            else (((.id // "user") | tostring)[0:8])
+            end;
+          ([
+            $xray[0].inbounds[]? |
+            select((.tag == $tls_tag) or (.tag == $reality_tag)) |
+            .settings.clients[]? |
+            client_tag as $tag |
+            {
+              tag:$tag,
+              uuid:(.id // ""),
+              email:(((.email // "") as $email | if ($email | length) > 0 then $email else ($tag+"@"+$domain) end))
+            }
+          ] | map(select((.uuid // "") != "")) | unique_by(.uuid)) as $clients |
+          .users = (.users // []) |
+          reduce $clients[] as $c (.;
+            if any((.users // [])[]?; (.uuid == $c.uuid) or (.tag == $c.tag)) then
+              .
+            else
+              .users += [{
+                tag:$c.tag,
+                uuid:$c.uuid,
+                email:$c.email,
+                enabled:true,
+                expire_at:"",
+                remark:(if $c.tag == $admin then "admin user (unlimited)" else "imported from xray/config.json" end),
+                traffic_limit_bytes:(if $c.tag == $admin then 0 else $limit end),
+                traffic_used_bytes:0,
+                traffic_auto_disable:($c.tag != $admin),
+                traffic_updated_at:"",
+                traffic_limited_at:"",
+                created_at:$now,
+                updated_at:$now
+              }]
+            end
+          )
+        ' "$VXD_USERS_DB" > "$tmp"; then
+            rm -f "$tmp"
+            return 1
+        fi
+        mv "$tmp" "$VXD_USERS_DB" || { rm -f "$tmp"; return 1; }
+    fi
+
+    tmp="$(mktemp "$VXD_USERS_DB.repair.XXXXXX")"
+    if ! jq --arg admin "$admin_tag" --arg now "$now" '
+      .users = (.users // []) |
+      .users |= map(
+        if .tag == $admin then
+          .traffic_limit_bytes = 0 |
+          .traffic_auto_disable = false |
+          .updated_at = (.updated_at // $now)
+        else
+          .
+        end
+      )
+    ' "$VXD_USERS_DB" > "$tmp"; then
+        rm -f "$tmp"
+        return 1
+    fi
+    mv "$tmp" "$VXD_USERS_DB" || { rm -f "$tmp"; return 1; }
+
+    chmod 600 "$VXD_USERS_DB" 2>/dev/null || true
 }
 
 vxd_ensure_user_db() {
     vxd_ensure_dirs
+    vxd_cleanup_user_db_temps
+
     if [[ -f "$VXD_USERS_DB" ]]; then
-        if jq -e '.users | type == "array"' "$VXD_USERS_DB" >/dev/null 2>&1; then
-            vxd_migrate_user_db
-            return 0
+        if vxd_user_db_is_valid; then
+            vxd_migrate_user_db || return 1
+            vxd_repair_user_db || return 1
+            vxd_user_db_is_valid && return 0
         fi
+        mv "$VXD_USERS_DB" "$VXD_USERS_DB.broken.$(vxd_ts)" 2>/dev/null || true
     fi
 
     local now domain uuid tmp admin_tag
@@ -385,13 +517,25 @@ vxd_ensure_user_db() {
             created_at:$now,
             updated_at:$now
           }]}
-        ' > "$tmp"
+        ' > "$tmp" || { rm -f "$tmp"; return 1; }
     else
-        jq -n '{users:[]}' > "$tmp"
+        jq -n '{users:[]}' > "$tmp" || { rm -f "$tmp"; return 1; }
     fi
 
-    mv "$tmp" "$VXD_USERS_DB"
+    mv "$tmp" "$VXD_USERS_DB" || { rm -f "$tmp"; return 1; }
     chmod 600 "$VXD_USERS_DB"
+    vxd_repair_user_db || return 1
+}
+
+vxd_traffic_users_db() {
+    vxd_ensure_user_db || return 1
+    if jq -e '((type == "object") and ((.users // []) | type == "array"))' "$VXD_USERS_DB" >/dev/null 2>&1; then
+        cat "$VXD_USERS_DB"
+    elif jq -e 'type == "array"' "$VXD_USERS_DB" >/dev/null 2>&1; then
+        jq '{users:.}' "$VXD_USERS_DB"
+    else
+        jq -n '{users:[]}'
+    fi
 }
 
 vxd_active_clients_json() {
@@ -954,14 +1098,31 @@ vxd_update_traffic_usage() {
     done < "$collect_file"
     rm -f "$collect_file"
 
+    tmp="$(mktemp "$VXD_TRAFFIC_DB.tmp.XXXXXX")"
+    if ! jq --slurpfile userdb <(vxd_traffic_users_db) --arg now "$now" '
+      ($userdb[0].users // [] | map(.tag // empty) | map(select(. != "")) | unique) as $tags |
+      reduce $tags[] as $tag (.;
+        if (.users[$tag]? == null) then
+          .users[$tag] = {uplink:0,downlink:0,last_total:null,updated_at:$now}
+        else
+          .
+        end
+      ) |
+      .updated_at=$now
+    ' "$VXD_TRAFFIC_DB" > "$tmp"; then
+        rm -f "$tmp"
+        return 1
+    fi
+    mv "$tmp" "$VXD_TRAFFIC_DB" || { rm -f "$tmp"; return 1; }
+
     chmod 600 "$VXD_TRAFFIC_DB" "$VXD_USERS_DB" 2>/dev/null || true
 }
 
 vxd_traffic_table() {
     vxd_load_main_config || true
-    vxd_ensure_user_db
+    vxd_ensure_user_db || return 1
     jq -r '
-      .users[]? |
+      (.users // [])[]? |
       [
         .tag,
         ((.traffic_used_bytes // 0) | tostring),
@@ -970,5 +1131,5 @@ vxd_traffic_table() {
         (if (.enabled // true) then "enabled" else "disabled" end),
         (.traffic_updated_at // "")
       ] | @tsv
-    ' "$VXD_USERS_DB"
+    ' < <(vxd_traffic_users_db)
 }

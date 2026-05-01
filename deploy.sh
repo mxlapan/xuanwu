@@ -7,6 +7,9 @@ CONFIG_FILE="$SCRIPT_DIR/.env"
 TELEGRAM_CONFIG_FILE="$SCRIPT_DIR/.env.telegram"
 COMMON_LIB="$SCRIPT_DIR/scripts/lib/common.sh"
 if [[ -f "$COMMON_LIB" ]]; then
+    if grep -q $'\r' "$COMMON_LIB" 2>/dev/null; then
+        sed -i 's/\r$//' "$COMMON_LIB" 2>/dev/null || true
+    fi
     # shellcheck source=scripts/lib/common.sh
     source "$COMMON_LIB"
 fi
@@ -884,7 +887,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=$SCRIPT_DIR
-ExecStart=$SCRIPT_DIR/scripts/traffic-manager.sh sync
+ExecStart=/bin/bash $SCRIPT_DIR/scripts/traffic-manager.sh sync
 User=root
 UMask=0077
 NoNewPrivileges=true
@@ -919,7 +922,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=$SCRIPT_DIR
-ExecStart=$SCRIPT_DIR/scripts/traffic-manager.sh monthly-reset
+ExecStart=/bin/bash $SCRIPT_DIR/scripts/traffic-manager.sh monthly-reset
 User=root
 UMask=0077
 NoNewPrivileges=true
@@ -947,6 +950,7 @@ EOF
     systemctl daemon-reload
     systemctl enable --now "$TRAFFIC_TIMER_NAME"
     systemctl enable --now "$TRAFFIC_MONTHLY_TIMER_NAME"
+    systemctl start "$TRAFFIC_SERVICE_NAME" || print_warning "Initial traffic sync failed; the timer will retry automatically"
     print_success "Traffic statistics timer installed (interval: $TRAFFIC_SYNC_INTERVAL)"
     print_success "Monthly traffic reset timer installed"
 }
@@ -1395,6 +1399,7 @@ cmd_traffic() {
         print_error "Config not found"
         exit 1
     fi
+    bash "$SCRIPT_DIR/scripts/traffic-manager.sh" sync >/dev/null 2>&1 || print_warning "Traffic sync failed; showing last saved data"
     bash "$SCRIPT_DIR/scripts/traffic-manager.sh" status "${1:-}"
 }
 
@@ -1508,6 +1513,8 @@ cmd_doctor() {
     doctor_check "Port 443 listening" bash -c "ss -tln 2>/dev/null | grep -q ':443' || netstat -tln 2>/dev/null | grep -q ':443'" || failed=$((failed+1))
     doctor_check "xray container running" bash -c "cd '$SCRIPT_DIR' && docker compose ps xray | grep -E 'Up|running'" || failed=$((failed+1))
     doctor_check "Xray stats API reachable" bash -c "cd '$SCRIPT_DIR' && docker exec xray xray api statsquery --server=127.0.0.1:10085 -pattern user >/dev/null" || failed=$((failed+1))
+    doctor_check "Traffic timer active" systemctl is-active --quiet "$TRAFFIC_TIMER_NAME" || failed=$((failed+1))
+    doctor_check "Monthly traffic reset timer active" systemctl is-active --quiet "$TRAFFIC_MONTHLY_TIMER_NAME" || failed=$((failed+1))
 
     if [[ -n "${DOMAIN:-}" ]]; then
         doctor_check "DNS resolves for $DOMAIN" bash -c "dig +short '$DOMAIN' | head -1 | grep -q ." || failed=$((failed+1))

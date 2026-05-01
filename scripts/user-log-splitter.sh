@@ -5,6 +5,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$(dirname "$SCRIPT_DIR")"
 COMMON_LIB="$INSTALL_DIR/scripts/lib/common.sh"
+if grep -q $'\r' "$COMMON_LIB" 2>/dev/null; then
+    sed -i 's/\r$//' "$COMMON_LIB" 2>/dev/null || true
+fi
 # shellcheck source=scripts/lib/common.sh
 source "$COMMON_LIB"
 

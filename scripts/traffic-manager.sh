@@ -5,6 +5,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$(dirname "$SCRIPT_DIR")"
 COMMON_LIB="$INSTALL_DIR/scripts/lib/common.sh"
+if grep -q $'\r' "$COMMON_LIB" 2>/dev/null; then
+    sed -i 's/\r$//' "$COMMON_LIB" 2>/dev/null || true
+fi
 # shellcheck source=scripts/lib/common.sh
 source "$COMMON_LIB"
 
@@ -23,7 +26,12 @@ traffic_status() {
     local filter="${1:-}"
     vxd_load_main_config || true
     vxd_ensure_user_db
-    local tag used limit percent status updated limit_text
+    local tag used limit percent status updated limit_text rows count
+    count=0
+    if ! rows="$(vxd_traffic_table)"; then
+        echo "Failed to read traffic status from $VXD_USERS_DB" >&2
+        return 1
+    fi
     printf '%-18s %-14s %-14s %-10s %-10s %s\n' "TAG" "USED" "LIMIT" "PERCENT" "STATUS" "UPDATED"
     while IFS=$'\t' read -r tag used limit percent status updated; do
         [[ -n "$tag" ]] || continue
@@ -34,7 +42,15 @@ traffic_status() {
             limit_text="$(vxd_format_bytes "$limit")"
         fi
         printf '%-18s %-14s %-14s %-10s %-10s %s\n' "$tag" "$(vxd_format_bytes "$used")" "$limit_text" "$percent" "$status" "$updated"
-    done < <(vxd_traffic_table)
+        count=$((count + 1))
+    done <<< "$rows"
+    if [[ $count -eq 0 ]]; then
+        if [[ -n "$filter" ]]; then
+            echo "No traffic record found for: $filter"
+        else
+            echo "No users found in $VXD_USERS_DB"
+        fi
+    fi
 }
 
 cmd_sync() {
@@ -136,12 +152,21 @@ cmd_monthly_reset() {
 }
 
 main() {
-    case "${1:-sync}" in
+    local cmd="${1:-sync}"
+    cmd="${cmd%$'\r'}"
+    cmd="${cmd#"${cmd%%[![:space:]]*}"}"
+    cmd="${cmd%"${cmd##*[![:space:]]}"}"
+    [[ -n "$cmd" ]] || cmd="sync"
+    case "$cmd" in
         sync) cmd_sync ;;
         monthly-reset) cmd_monthly_reset ;;
         status) traffic_status "${2:-}" ;;
         help|--help|-h) usage ;;
-        *) usage; exit 1 ;;
+        *)
+            echo "Unknown command: $cmd" >&2
+            usage
+            exit 1
+            ;;
     esac
 }
 
