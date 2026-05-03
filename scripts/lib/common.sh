@@ -379,25 +379,32 @@ vxd_repair_user_db() {
     admin_tag="${ADMIN_USER_TAG:-$VXD_DEFAULT_ADMIN_USER_TAG}"
     limit="$(vxd_parse_bytes "${TRAFFIC_DEFAULT_LIMIT:-$VXD_DEFAULT_TRAFFIC_LIMIT}" 2>/dev/null || echo 0)"
 
-    if [[ -n "${UUID:-}" ]] && ! jq -e --arg tag "$admin_tag" --arg uuid "$UUID" 'any((.users // [])[]?; (.tag == $tag) or (.uuid == $uuid))' "$VXD_USERS_DB" >/dev/null 2>&1; then
+    if [[ -n "${UUID:-}" ]]; then
         tmp="$(mktemp "$VXD_USERS_DB.repair.XXXXXX")"
         if ! jq --arg tag "$admin_tag" --arg uuid "$UUID" --arg domain "$domain" --arg now "$now" '
+          def normalized_admin:
+            (. // {}) |
+            .tag=$tag |
+            .uuid=$uuid |
+            .email=($tag+"@"+$domain) |
+            .enabled=true |
+            .expire_at="" |
+            .remark=(if ((.remark // "") | length) > 0 then .remark else "admin user (unlimited)" end) |
+            .traffic_limit_bytes=0 |
+            .traffic_used_bytes=((.traffic_used_bytes // 0) | tonumber) |
+            .traffic_auto_disable=false |
+            .traffic_updated_at=(.traffic_updated_at // "") |
+            .traffic_limited_at="" |
+            .created_at=(.created_at // $now) |
+            .updated_at=$now;
+
           .users = (.users // []) |
-          .users += [{
-            tag:$tag,
-            uuid:$uuid,
-            email:($tag+"@"+$domain),
-            enabled:true,
-            expire_at:"",
-            remark:"admin user (unlimited)",
-            traffic_limit_bytes:0,
-            traffic_used_bytes:0,
-            traffic_auto_disable:false,
-            traffic_updated_at:"",
-            traffic_limited_at:"",
-            created_at:$now,
-            updated_at:$now
-          }]
+          ([.users[]? | select(.tag == $tag)] | first) as $admin |
+          .users = ([($admin | normalized_admin)] + [
+            .users[]? |
+            select(.tag != $tag) |
+            select((.uuid // "") != $uuid)
+          ])
         ' "$VXD_USERS_DB" > "$tmp"; then
             rm -f "$tmp"
             return 1
