@@ -1,17 +1,25 @@
-.env
-.env.telegram
+# deployment secrets and runtime state
+deploy/**/.env
+deploy/panel/data/
+deploy/node/certs/
+deploy/node/logs/
 
-xray/config.json
-nginx/nginx.conf
+# node runtime state — scaffolded by deploy.sh, never committed
+deploy/node/data/
 
-certs/
-data/
-backups/
+# per-host compose overrides (NPM network, ports, ...)
+deploy/**/docker-compose.override.yml
+
+# go
+/panel
+/agent
+
+# local tooling / editor
+.claude/
+
+# backups copied out by ./deploy.sh backup
+/panel-backup-*.db
 
 *.log
 *.zip
-
-logs/
-
 tmp/
-.telegram-bot.lock/

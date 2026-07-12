@@ -1,0 +1,21 @@
+services:
+  panel:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.panel
+    image: xuanwu-panel:latest
+    container_name: xuanwu-panel
+    restart: always
+    ports:
+      - "${PANEL_PORT:-8088}:8088"
+    environment:
+      PANEL_JWT_SECRET: ${PANEL_JWT_SECRET:-}
+      PANEL_ADMIN_USER: ${PANEL_ADMIN_USER:-admin}
+      PANEL_ADMIN_PASS: ${PANEL_ADMIN_PASS:?set a strong PANEL_ADMIN_PASS in deploy/panel/.env (>=8 chars, upper+lower+digit+special)}
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8088/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

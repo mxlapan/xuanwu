@@ -1,308 +1,130 @@
-# VLESS Vision + REALITY + Nginx Stream Docker
+# 玄武 Xuanwu — VLESS Vision + REALITY multi-node system
 
-One-click deployment for VLESS Vision with both TLS and REALITY on public port
-443. Nginx stream uses SNI preread to split traffic to the proper Xray inbound,
-while normal HTTPS fallback content is still served by Nginx.
+A self-hosted system for running **VLESS + XTLS-Vision** (real-cert TLS and
+REALITY, both on port 443, split by nginx SNI preread) across one or many
+servers, with a central control panel, a self-service user portal, and a
+Telegram bot.
 
-## Architecture
+Everything is Go — two static binaries, `panel` and `agent` — plus an unchanged
+nginx + Xray Docker stack on each node.
 
-```text
-client -> :443 -> nginx stream (ssl_preread)
-                  ├── SNI = REALITY_SERVER_NAME -> xray:10443  VLESS + REALITY + Vision
-                  └── default / your domain     -> xray:10444  VLESS + TLS + Vision
-                                                       └── fallback -> nginx:8080 website
+## Two ways to deploy
+
+- **Panel + managed nodes** — a central **control panel** (web UI + Telegram
+  bot) manages users, quotas and subscriptions across any number of nodes. Each
+  node runs a lightweight **agent** that dials the panel over an outbound
+  WebSocket, applies the Xray config the panel generates, and reports traffic
+  and devices. **The panel is a standalone service** — deploy it by itself and
+  add nodes later.
+- **Standalone node (no panel)** — a single server with local user management,
+  like a classic one-box setup.
+
+```
+                        ┌───────────────────────────┐
+   admin browser ─────► │  PANEL  (standalone)       │
+   user portal ───────► │   REST API + embedded SPA  │
+   user /sub/{token} ─► │   node WebSocket hub       │
+   Telegram bot ──────► │   SQLite + daily backups   │
+                        └──────────────▲─────────────┘
+                                       │ outbound WS + node token
+              ┌────────────────────────┼────────────────────────┐
+        ┌─────┴─────┐            ┌──────┴────┐             ┌──────┴────┐
+        │ node A    │            │ node B    │             │ node C    │
+        │ agent     │            │ agent     │             │ agent     │
+        │ nginx+xray│            │ nginx+xray│             │ nginx+xray│
+        └───────────┘            └───────────┘             └───────────┘
 ```
 
-## Structure
+## Feature highlights
 
-```
-vless-xtls-docker/
-├── deploy.sh                    # Main script
-├── docker-compose.yml           # Docker compose
-├── .env.example                  # Example generated configuration
-├── .env.telegram.example         # Example Telegram bot secrets
-├── clash_config.yaml.template    # Clash config template
-├── data/                         # Runtime user database (generated)
-├── backups/                      # Runtime backups (generated)
-├── xray/
-│   └── config.json.template     # Xray config template
-├── nginx/
-│   ├── nginx.conf.template      # Nginx config template
-│   └── html/                    # Fallback website
-├── scripts/
-│   ├── lib/common.sh             # Shared shell helpers
-│   ├── renew-cert.sh            # Certificate renewal
-│   ├── optimize.sh              # System optimization
-│   ├── telegram-bot.sh          # Telegram management bot
-│   ├── traffic-manager.sh       # Traffic stats and quota enforcement
-│   └── user-log-splitter.sh     # Split Xray access log by user
-└── LICENSE
-```
+- **Central user management** — quotas (data + expiry), monthly auto-reset,
+  enable/disable, enforced across all nodes.
+- **Restart-free updates** — the agent applies user add/remove to the running
+  Xray over its gRPC `HandlerService`; it only restarts the container when
+  non-user settings change (or a TLS cert is renewed).
+- **Unified subscriptions** — one link per user across all their nodes, in
+  base64 (v2rayN), Clash/Mihomo and sing-box formats; one-tap import + QR.
+- **Self-service portal** — users sign in to see usage/expiry, copy links, scan
+  QR codes; admin-set passwords are temporary and **force a change on first
+  login**.
+- **Durable traffic accounting** — ack-gated, persisted buffer + per-node
+  dedup, so a dropped connection never loses a reporting window.
+- **Device tracking** — distinct source IPs per user, admin-only.
+- **Security** — admin 2FA (TOTP), a strong password policy, session
+  revocation, security headers, multiple admin accounts, and an audit log.
+- **Telegram** — a management bot *and* push notifications (node up/down, user
+  disabled/over-quota/expired).
+- **Ops** — consistent DB backups (endpoint + daily snapshots), graceful
+  shutdown, optional ACME/Let's Encrypt for node certs with hot-reload.
 
-## Quick Start
+## Quick start
 
-### Requirements
-
-- VPS (Ubuntu 20.04+ recommended)
-- Domain pointing to server IP
-- Ports 80 and 443 open
-
-### Install
+**Panel (standalone):**
 
 ```bash
-chmod +x deploy.sh scripts/*.sh
-sudo ./deploy.sh install
+cd deploy/panel
+cp .env.example .env      # set PANEL_ADMIN_PASS (strong), PANEL_JWT_SECRET, PANEL_PUBLIC_URL
+cd ../.. && ./deploy.sh panel
+# open PANEL_PUBLIC_URL and log in
 ```
 
-The installer prompts before applying optional global network optimization
-settings. You can skip it during install and run it later with:
+**Add a managed node:** in the UI create a node (click *Generate REALITY keys*),
+open *Install* for the token + one-liner, then:
 
 ```bash
-sudo ./deploy.sh optimize
+cd deploy/node
+cp .env.example .env      # MODE=managed, PANEL_URL, NODE_TOKEN, DOMAIN, REALITY_SERVER_NAME
+cd ../.. && ./deploy.sh node
 ```
 
-## Commands
-
-### Basic
-
-| Command | Description |
-|---------|-------------|
-| `./deploy.sh install` | Install service |
-| `./deploy.sh uninstall` | Uninstall service |
-| `./deploy.sh start` | Start service |
-| `./deploy.sh stop` | Stop service |
-| `./deploy.sh restart` | Restart service |
-| `./deploy.sh status` | Show service summary |
-| `./deploy.sh doctor` | Run diagnostics |
-| `./deploy.sh logs` | Show logs |
-
-### Configuration
-
-| Command | Description |
-|---------|-------------|
-| `./deploy.sh config` | Show configuration |
-| `./deploy.sh backup` | Backup configuration |
-
-### User Management
-
-| Command | Description |
-|---------|-------------|
-| `./deploy.sh users` | List users |
-| `./deploy.sh adduser` | Add user |
-| `./deploy.sh deluser` | Delete user |
-| `./deploy.sh enableuser <tag>` | Enable user |
-| `./deploy.sh disableuser <tag>` | Disable user |
-| `./deploy.sh expireuser <tag> <YYYY-MM-DD\|never>` | Set expiry |
-| `./deploy.sh userlog <tag> [lines]` | Show one user's separated access log |
-
-### Traffic and Quotas
-
-| Command | Description |
-|---------|-------------|
-| `./deploy.sh traffic [tag]` | Show persisted traffic usage |
-
-### Maintenance
-
-| Command | Description |
-|---------|-------------|
-| `./deploy.sh update` | Update Docker images |
-| `./deploy.sh optimize` | Optimize system (BBR) |
-
-### Telegram Bot
-
-| Command | Description |
-|---------|-------------|
-| `./deploy.sh bot-install` | Install/start Telegram management bot |
-| `./deploy.sh bot-uninstall` | Remove Telegram bot service |
-
-Docker images are pinned by default and can be changed in `.env` after you test
-the new versions:
-
-- `XRAY_IMAGE`
-- `NGINX_IMAGE`
-- `CERTBOT_IMAGE`
-
-Runtime users are stored in `data/users.json`. `xray/config.json` is generated
-from `xray/config.json.template` plus the enabled, non-expired users in this
-database. User mutations create timestamped backups under `backups/` and will
-roll back if rendering or restarting xray fails.
-
-Per-user access logs are split from `logs/xray/access.log` into
-`logs/users/<tag>.log` by the `vless-user-log-splitter` systemd service.
-
-Traffic accounting uses Xray StatsService (`127.0.0.1:10085`). The
-`vless-traffic-manager.timer` periodically updates `data/users.json` and
-`data/traffic.json`; normal users get `TRAFFIC_DEFAULT_LIMIT="20G"` by default.
-The admin user is unlimited. Users who reach their quota are automatically
-disabled, and traffic is reset monthly on the first day of the month.
-
-## Client Configuration
-
-| Parameter | Value |
-|-----------|-------|
-| Protocol | VLESS |
-| Port | 443 |
-| Flow | xtls-rprx-vision |
-| Encryption | none |
-| Network | tcp |
-| Security | tls / reality |
-| Fingerprint | chrome |
-
-### Share Link Format
-
-```
-vless://UUID@domain:443?encryption=none&security=tls&sni=domain&fp=chrome&type=tcp&flow=xtls-rprx-vision#name
-vless://UUID@domain:443?encryption=none&security=reality&sni=REALITY_SERVER_NAME&fp=chrome&pbk=PUBLIC_KEY&sid=SHORT_ID&type=tcp&flow=xtls-rprx-vision#name
-```
-
-### Telegram Bot User Management
-
-After the service is installed, configure the bot:
+**Standalone node (no panel):**
 
 ```bash
-sudo ./deploy.sh bot-install
+cd deploy/node && cp .env.example .env   # MODE=standalone, DOMAIN, ADDRESS, REALITY_*
+../../deploy.sh keys                      # generate a REALITY keypair
+cd ../.. && ./deploy.sh standalone
+./deploy.sh user add alice                # prints alice's vless:// links
 ```
 
-Bot commands:
+> Put the panel behind **HTTPS** in production — session cookies are only marked
+> `Secure` when `PANEL_PUBLIC_URL` is `https://`.
 
-```text
-/id
-/users
-/add alice
-/add bob 2026-12-31 "temporary user"
-/del alice
-/enable alice
-/disable alice
-/expire alice 2026-12-31
-/expire alice never
-/remark alice main phone
-/link alice all
-/traffic alice
-/userlog alice 100
-/userlog alice file
-/config alice
-/config alice all clash plain
-/config alice all shadowrocket plain
-/config alice reality shadowrocket tgz
-/config alice all clash enc optional-password
-/status
-/restart
-/confirm abc123
-/cancel abc123
+## Documentation
+
+Full docs live in [`docs/`](docs/):
+
+| Topic | |
+|---|---|
+| [Deployment](docs/deployment.md) | panel (standalone), managed & standalone nodes, TLS, ACME, backups |
+| [Configuration](docs/configuration.md) | every environment variable, panel + node |
+| [Users & subscriptions](docs/users.md) | quotas, expiry, monthly reset, sub formats, rotation, devices, notes |
+| [Self-service portal](docs/portal.md) | user login, forced password change, password policy |
+| [Telegram](docs/telegram.md) | bot commands + push notifications + setup |
+| [Security](docs/security.md) | auth model, 2FA, sessions, multi-admin, audit log, threat model |
+| [Protocol](docs/PROTOCOL.md) | panel ↔ agent WebSocket wire protocol |
+| [Troubleshooting](docs/troubleshooting.md) | common problems |
+
+## Repository layout
+
+```
+.
+├── deploy.sh                 # dispatcher: panel | node | standalone | user | keys | backup
+├── cmd/{panel,agent}/        # entrypoints
+├── internal/
+│   ├── panel/                # API, hub, subscriptions, traffic, devices, bot, notify, web SPA
+│   ├── agent/                # WS client, standalone mode, live gRPC edits, access-log/cert watchers
+│   ├── xrayconf/             # shared Xray config generator
+│   ├── reality/              # x25519 keypair generation
+│   └── wire/                 # shared panel↔agent message types
+├── deploy/{panel,node}/      # docker-compose + .env.example
+├── Dockerfile.{panel,agent}
+└── docs/
 ```
 
-`/config` supports protocol selector, export format, and packaging mode.
-Without extra options, Telegram returns an `all clash plain` profile containing
-both TLS Vision and REALITY Vision. Clash YAML targets Mihomo / Clash.Meta
-compatible clients; classic Clash core does not support VLESS Vision / REALITY.
+## Build & test
 
-- Protocol: `tls`, `reality`, `all`.
-- Format: `clash` for full Mihomo/Clash.Meta YAML, `shadowrocket` for pure
-  `vless://` node links accepted by Shadowrocket.
-- Mode: `plain`, `tgz`, `enc`.
-
-- `plain`: send `.yaml` for `clash`, or `.txt` pure nodes for `shadowrocket`.
-- `tgz`: send a compressed `.tar.gz` config archive.
-- `enc`: send a `.tar.gz.enc` encrypted archive using `openssl enc -aes-256-cbc -pbkdf2`.
-
-Destructive Telegram actions such as `/del`, `/disable`, and `/restart`
-require `/confirm <code>`. Bot actions are audited in
-`logs/telegram-bot/audit.log`.
-
-Telegram secrets are stored separately in `.env.telegram`. Only Telegram user
-IDs listed in `.env.telegram` `TELEGRAM_ADMIN_IDS` can manage users.
-If you do not know your user ID yet, leave the admin ID empty during
-`bot-install`, send `/id` to the bot, then rerun `sudo ./deploy.sh bot-install`
-and set the returned `user_id`.
-
-### Clash Template Options
-
-These `.env` values affect generated Clash files:
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `CLASH_PROXY_NAME_PREFIX` | empty | Optional proxy name prefix |
-| `CLASH_ALLOW_LAN` | `true` | Generated `allow-lan` value |
-| `CLASH_MODE` | `rule` | Generated Clash mode |
-| `CLASH_RULESET` | `loyalsoldier` | Reserved ruleset selector |
-
-### REALITY Options
-
-These `.env` values are generated during install. `REALITY_SERVER_NAME` must be
-different from your own `DOMAIN`, because Nginx uses SNI to distinguish TLS
-Vision and REALITY Vision on the same public `443`.
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `REALITY_ENABLED` | `true` | Keep REALITY inbound enabled |
-| `REALITY_SERVER_NAME` | `www.microsoft.com` | SNI used by REALITY clients and Nginx stream split |
-| `REALITY_DEST` | `www.microsoft.com:443` | REALITY handshake destination |
-| `REALITY_PRIVATE_KEY` | generated | X25519 private key for server |
-| `REALITY_PUBLIC_KEY` | generated | Public key sent to clients |
-| `REALITY_SHORT_ID` | generated | REALITY short ID |
-
-### Traffic Options
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `ADMIN_USER_TAG` | `admin` | Initial admin user tag; admin is unlimited |
-| `TRAFFIC_DEFAULT_LIMIT` | `20G` | Default monthly quota for newly added normal users |
-| `TRAFFIC_SYNC_INTERVAL` | `2min` | systemd timer interval for traffic sync/enforcement |
-
-### Recommended Clients
-
-| Platform | Client |
-|----------|--------|
-| Windows | v2rayN, Clash Verge Rev / Mihomo |
-| macOS | V2rayU, Clash Verge Rev / Mihomo |
-| Linux | v2rayA, Clash Verge Rev / Mihomo |
-| Android | v2rayNG, Clash Meta / Mihomo |
-| iOS | Shadowrocket, Stash |
-
-## Certificate
-
-Auto-renewal is configured via cron (daily at 3 AM).
-
-Certificate source is tracked in `.env`:
-
-- `CERT_SOURCE="project"`: certbot metadata is stored under `./certs`.
-- `CERT_SOURCE="system"`: certificates are synchronized from `/etc/letsencrypt/live/<domain>`.
-
-Manual renewal:
 ```bash
-sudo ./scripts/renew-cert.sh
+go build ./...
+go vet ./...
+go test ./...
 ```
-
-Check expiry:
-```bash
-openssl x509 -in certs/fullchain.pem -noout -dates
-```
-
-## Troubleshooting
-
-### Check logs
-```bash
-./deploy.sh logs
-```
-
-### Run diagnostics
-```bash
-sudo ./deploy.sh doctor
-```
-
-### Check ports
-```bash
-ss -tlnp | grep ':443'
-```
-
-Nginx publishes `443` as the stream entry point. The fallback website listens
-on `8080` inside the Docker network only; `8080` is not published on the host.
-
-### Test TLS
-```bash
-openssl s_client -connect domain:443 -servername domain
-```
-
-## License
-
-MIT License

@@ -1,0 +1,16 @@
+# build the control panel
+FROM golang:1.26-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags "-s -w" -o /panel ./cmd/panel
+
+FROM alpine:3.22
+RUN apk add --no-cache wget && mkdir -p /data
+COPY --from=build /panel /usr/local/bin/panel
+# Runs as root so a host bind-mounted ./data is writable regardless of its owner.
+# The container is otherwise isolated (no host mounts beyond ./data, no caps,
+# no docker socket).
+EXPOSE 8088
+ENTRYPOINT ["/usr/local/bin/panel"]

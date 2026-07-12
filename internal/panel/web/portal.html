@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>玄武 Xuanwu — My Account</title>
+<style>
+  :root {
+    --bg:#0a0e17; --bg2:#0e131f; --panel:#131a29; --panel2:#18202f;
+    --line:#212a3d; --line2:#2c3750; --fg:#eef2fb; --mut:#9aa7c2; --mut2:#68748e;
+    --acc:#6d8bff; --acc2:#93a6ff; --grad:linear-gradient(135deg,#6366f1,#8b5cf6);
+    --ok:#3ddc97; --bad:#ff6b7d; --warn:#f7b955;
+    --shadow:0 10px 34px rgba(0,0,0,.4); --r:14px;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.55 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"PingFang SC","Microsoft YaHei",sans-serif;
+    background:radial-gradient(1000px 500px at 80% -10%, #16203a 0%, transparent 60%), var(--bg); color:var(--fg); min-height:100vh; }
+  a { color:var(--acc2); }
+  .wrap { max-width:760px; margin:0 auto; padding:28px 18px 60px; }
+  .brand { display:flex; align-items:center; gap:12px; margin-bottom:22px; }
+  .brand .logo { width:38px; height:38px; border-radius:11px; background:linear-gradient(135deg,var(--acc),#8a5bff); display:grid; place-items:center; font-size:21px; box-shadow:var(--shadow); }
+  .brand b { font-size:16px; } .brand span { display:block; font-size:11px; color:var(--mut2); }
+  .brand .grow { flex:1; }
+
+  button { font:inherit; cursor:pointer; border:1px solid var(--line2); background:var(--panel2); color:var(--fg); border-radius:9px; padding:8px 13px; transition:.12s; }
+  button:hover { border-color:var(--acc); }
+  button.primary { background:linear-gradient(135deg,var(--acc),#6f7bff); border-color:transparent; color:#fff; font-weight:600; }
+  button.primary:hover { filter:brightness(1.08); }
+  button.sm { padding:5px 10px; font-size:12.5px; }
+  input { font:inherit; background:var(--bg2); color:var(--fg); border:1px solid var(--line2); border-radius:9px; padding:10px 12px; width:100%; }
+  input:focus { outline:none; border-color:var(--acc); box-shadow:0 0 0 3px rgba(91,141,255,.15); }
+  label { display:block; font-size:12px; color:var(--mut); margin:12px 0 5px; }
+
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow); padding:18px 20px; margin-bottom:16px; }
+  .card h3 { margin:0 0 14px; font-size:14px; color:var(--mut); text-transform:uppercase; letter-spacing:.05em; font-weight:600; }
+
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; }
+  .stat .k { color:var(--mut); font-size:12px; } .stat .v { font-size:22px; font-weight:700; margin-top:4px; letter-spacing:-.01em; }
+  .stat .v small { font-size:13px; color:var(--mut); font-weight:500; }
+  .prog { height:7px; border-radius:6px; background:var(--line); overflow:hidden; margin-top:9px; }
+  .prog > i { display:block; height:100%; background:linear-gradient(90deg,var(--acc),#8a5bff); }
+  .prog.warn > i { background:linear-gradient(90deg,var(--warn),#ff8a3d); } .prog.bad > i { background:linear-gradient(90deg,var(--bad),#ff3d6a); }
+  .pill { font-size:12px; padding:3px 11px; border-radius:20px; border:1px solid var(--line2); color:var(--mut); }
+  .pill.on { color:var(--ok); border-color:rgba(53,208,138,.4); background:rgba(53,208,138,.08); }
+  .pill.off { color:var(--bad); border-color:rgba(255,93,108,.4); background:rgba(255,93,108,.08); }
+
+  .field { background:var(--bg2); border:1px solid var(--line); border-radius:9px; padding:9px 11px; display:flex; align-items:center; gap:8px; margin-top:8px; }
+  .field code { flex:1; background:none; padding:0; word-break:break-all; font-size:12.5px; font-family:ui-monospace,Menlo,Consolas,monospace; color:var(--mut); }
+  .imp { display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+  .node { border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-top:10px; background:var(--bg2); }
+  .node b { font-size:13px; }
+  .qr { display:flex; gap:22px; flex-wrap:wrap; margin-top:6px; }
+  .qr figure { margin:0; text-align:center; }
+  .qr img { width:168px; height:168px; background:#fff; padding:9px; border-radius:10px; display:block; }
+  .qr figcaption { color:var(--mut); font-size:12px; margin-top:7px; }
+  .mut { color:var(--mut); } .grow { flex:1; }
+
+  .login { max-width:360px; margin:12vh auto 0; }
+  .toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--panel2); border:1px solid var(--line2); padding:11px 18px; border-radius:10px; box-shadow:var(--shadow); }
+  .banner { border-radius:10px; padding:11px 14px; margin-bottom:16px; font-size:13px; }
+  .banner.bad { background:rgba(255,93,108,.1); border:1px solid rgba(255,93,108,.35); color:#ffb3ba; }
+  .banner.warn { background:rgba(245,181,68,.1); border:1px solid rgba(245,181,68,.35); color:#f5cf8a; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="/portal.js"></script>
+</body>
+</html>
