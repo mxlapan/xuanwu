@@ -4,7 +4,9 @@ package panel
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"log"
@@ -50,6 +52,10 @@ type App struct {
 
 	metricsMu   sync.Mutex
 	nodeMetrics map[int64]*wire.NodeMetrics
+
+	rateMu   sync.Mutex
+	nodeRate map[int64]float64 // smoothed throughput, bytes/sec
+	rateLast map[int64]int64   // unix seconds of the last traffic report
 
 	notifyMu        sync.Mutex
 	userActive      map[int64]bool
@@ -114,6 +120,77 @@ func (a *App) getNodeMetrics(nodeID int64) *wire.NodeMetrics {
 	a.metricsMu.Lock()
 	defer a.metricsMu.Unlock()
 	return a.nodeMetrics[nodeID]
+}
+
+// rateStaleAfter is how long without a traffic report before a node's throughput
+// reading is considered stale (reports arrive every STATS_INTERVAL, default 60s).
+const rateStaleAfter = 180
+
+// recordRate folds a node's latest traffic batch (bytes since its previous
+// report) into a smoothed bytes/sec throughput. An EWMA over report intervals
+// keeps a single bursty or quiet window from dominating the reading.
+func (a *App) recordRate(nodeID, bytes int64) {
+	now := time.Now().Unix()
+	a.rateMu.Lock()
+	defer a.rateMu.Unlock()
+	if a.rateLast == nil {
+		a.rateLast, a.nodeRate = map[int64]int64{}, map[int64]float64{}
+	}
+	last := a.rateLast[nodeID]
+	a.rateLast[nodeID] = now
+	if last == 0 || now <= last {
+		return // need a positive interval to derive a rate
+	}
+	inst := float64(bytes) / float64(now-last)
+	if prev, ok := a.nodeRate[nodeID]; ok {
+		a.nodeRate[nodeID] = prev*0.5 + inst*0.5
+	} else {
+		a.nodeRate[nodeID] = inst
+	}
+}
+
+// getNodeRate returns a node's smoothed throughput in bytes/sec, or 0 if no
+// traffic has been reported recently enough to be meaningful.
+func (a *App) getNodeRate(nodeID int64) float64 {
+	a.rateMu.Lock()
+	defer a.rateMu.Unlock()
+	if time.Now().Unix()-a.rateLast[nodeID] > rateStaleAfter {
+		return 0
+	}
+	return a.nodeRate[nodeID]
+}
+
+// staticHandler serves the embedded SPA with a content-hash ETag and
+// Cache-Control: no-cache. Embedded files carry a zero modtime, so the stock
+// FileServer sends no validator and browsers keep serving a stale app.js after
+// a redeploy. With an ETag the browser revalidates on each load: an unchanged
+// asset costs a cheap 304, while a new build is fetched immediately.
+func staticHandler(fsys fs.FS) http.Handler {
+	fileServer := http.FileServer(http.FS(fsys))
+	etags := map[string]string{}
+	_ = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if b, err := fs.ReadFile(fsys, p); err == nil {
+			sum := sha256.Sum256(b)
+			etags["/"+p] = `"` + hex.EncodeToString(sum[:8]) + `"`
+		}
+		return nil
+	})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if p == "/" {
+			p = "/index.html"
+		}
+		if et, ok := etags[p]; ok {
+			// ServeContent (used by FileServer) honours this ETag for
+			// If-None-Match, returning 304 when the client's copy is current.
+			w.Header().Set("Etag", et)
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+		fileServer.ServeHTTP(w, r)
+	})
 }
 
 func env(key, def string) string {
@@ -232,6 +309,8 @@ func Run(cfg Config) error {
 		store:           store,
 		activeCache:     map[int64]string{},
 		nodeMetrics:     map[int64]*wire.NodeMetrics{},
+		nodeRate:        map[int64]float64{},
+		rateLast:        map[int64]int64{},
 		userActive:      map[int64]bool{},
 		offlineNotified: map[int64]bool{},
 		loginLimiter:    newLimiter(8, 5*time.Minute),
@@ -276,11 +355,13 @@ func Run(cfg Config) error {
 	mux.HandleFunc("POST /api/logout-all", app.requireAuth(app.handleLogoutAll))
 	mux.HandleFunc("GET /api/me", app.requireAuth(app.handleMe))
 
+	mux.HandleFunc("GET /api/stats", app.requireAuth(app.handleStats))
 	mux.HandleFunc("GET /api/nodes", app.requireAuth(app.handleListNodes))
 	mux.HandleFunc("POST /api/nodes", app.requireAuth(app.handleCreateNode))
 	mux.HandleFunc("PUT /api/nodes/{id}", app.requireAuth(app.handleUpdateNode))
 	mux.HandleFunc("DELETE /api/nodes/{id}", app.requireAuth(app.handleDeleteNode))
 	mux.HandleFunc("GET /api/nodes/{id}/install", app.requireAuth(app.handleNodeInstall))
+	mux.HandleFunc("GET /api/nodes/{id}/traffic-history", app.requireAuth(app.handleNodeTrafficHistory))
 	mux.HandleFunc("POST /api/reality-keys", app.requireAuth(app.handleRealityKeys))
 	mux.HandleFunc("GET /api/backup", app.requireAuth(app.handleBackup))
 
@@ -311,6 +392,7 @@ func Run(cfg Config) error {
 	mux.HandleFunc("POST /api/users/{id}/reset-traffic", app.requireAuth(app.handleResetUserTraffic))
 	mux.HandleFunc("GET /api/users/{id}/sub", app.requireAuth(app.handleUserSubInfo))
 	mux.HandleFunc("GET /api/users/{id}/traffic-history", app.requireAuth(app.handleUserTrafficHistory))
+	mux.HandleFunc("GET /api/users/{id}/traffic-nodes", app.requireAuth(app.handleUserTrafficNodes))
 	mux.HandleFunc("GET /api/users/{id}/devices", app.requireAuth(app.handleUserDevices))
 	mux.HandleFunc("POST /api/users/{id}/rotate-sub", app.requireAuth(app.handleRotateSub))
 	mux.HandleFunc("POST /api/users/{id}/rotate-uuid", app.requireAuth(app.handleRotateUUID))
@@ -330,7 +412,7 @@ func Run(cfg Config) error {
 	mux.HandleFunc("GET /api/portal/qr", app.handlePortalQR)
 
 	sub, _ := fs.Sub(webFS, "web")
-	mux.Handle("GET /", http.FileServer(http.FS(sub)))
+	mux.Handle("GET /", staticHandler(sub))
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,

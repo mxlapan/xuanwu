@@ -51,10 +51,31 @@ From a user's **Access** dialog (link icon):
 
 ## Traffic
 
-- Usage is shown per user as `used / limit (percent)` with a bar.
+- Usage is shown per user as `used / limit (percent)` with a bar. When the
+  recent daily rate would exhaust the quota within two weeks, a **`~Nd to
+  quota`** projection appears (estimated from the last 7 days' average).
 - **Reset** (refresh icon) zeroes a user's counter immediately (e.g. a manual
-  monthly reset).
-- **Stats** (chart icon) shows a 30-day daily-usage chart.
+  monthly reset). This clears both the aggregate and the per-node breakdown;
+  daily history for the charts is preserved.
+- **Stats** (chart icon) shows a 30-day daily-usage chart plus a **per-node**
+  table with the uplink/downlink split for that user.
+
+## Dashboard
+
+The dashboard is a fleet overview rather than a single total:
+
+- **Stat tiles** — nodes online, active users, **this month** (with today's
+  usage) and **all-time traffic**, the last two split into uplink/downlink.
+- **Fleet traffic** — a 30-day stacked daily chart (upload over download).
+- **Traffic by node** — per-node up/down/total, plus a **live** throughput
+  reading and the count of active clients (distinct source IPs in the last 5
+  minutes). Click a row for that node's 30-day trend.
+- **Top users by traffic** — per-user up/down/total.
+
+Live throughput is a smoothed estimate updated from each node's traffic report
+(every `STATS_INTERVAL`, default 60s); it also appears in the **Nodes** tab
+health column alongside load, memory and the active-client count. Per-node daily
+history begins accruing when a node first reports under this version.
 
 Accounting is durable: the agent buffers reports and only clears them once the
 panel acknowledges, and the panel de-duplicates by sequence number, so a dropped

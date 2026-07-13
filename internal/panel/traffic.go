@@ -41,6 +41,7 @@ func (a *App) ingestTraffic(nodeID, seq int64, items []wire.TrafficItem) {
 	for _, u := range users {
 		allowed[u.Username] = u.ID
 	}
+	var batchBytes int64
 	for _, it := range items {
 		if it.Up == 0 && it.Down == 0 {
 			continue
@@ -52,7 +53,9 @@ func (a *App) ingestTraffic(nodeID, seq int64, items []wire.TrafficItem) {
 		if err := a.store.AddTraffic(uid, nodeID, it.Up, it.Down); err != nil {
 			log.Printf("add traffic %s: %v", it.Email, err)
 		}
+		batchBytes += it.Up + it.Down
 	}
+	a.recordRate(nodeID, batchBytes)
 	if seq != 0 {
 		if err := a.store.SetNodeTrafficSeq(nodeID, seq); err != nil {
 			log.Printf("set traffic seq node %d: %v", nodeID, err)

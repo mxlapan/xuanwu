@@ -165,42 +165,139 @@ async function renderDashboard(main) {
   main.appendChild(b);
   const holder = $(`<div class="loading">Loading…</div>`);
   main.appendChild(holder);
+  let stats;
   try {
-    [state.users, state.nodes] = await Promise.all([api("/api/users"), api("/api/nodes")]);
+    [state.users, state.nodes, stats] = await Promise.all([api("/api/users"), api("/api/nodes"), api("/api/stats")]);
   } catch (e) { holder.textContent = e.message; return; }
+  stats = stats || { total: { up: 0, down: 0 }, today: { up: 0, down: 0 }, month: { up: 0, down: 0 }, trend: [], nodes: [], users: {} };
+  const nodeAgg = {};
+  (stats.nodes || []).forEach((n) => { nodeAgg[n.node_id] = n; });
+  const userAgg = stats.users || {};
   const now = Math.floor(Date.now() / 1000);
   const online = state.nodes.filter((n) => n.online).length;
   const active = state.users.filter((u) => u.enabled && (!u.expire_at || u.expire_at > now) && (!u.data_limit || u.data_used < u.data_limit)).length;
-  const totalUsed = state.users.reduce((s, u) => s + Number(u.data_used || 0), 0);
+  const up = Number(stats.total.up || 0), down = Number(stats.total.down || 0);
+  const tup = Number(stats.today.up || 0), tdn = Number(stats.today.down || 0);
+  const mup = Number(stats.month.up || 0), mdn = Number(stats.month.down || 0);
   const overQuota = state.users.filter((u) => u.data_limit && u.data_used >= u.data_limit).length;
+  const split = (a, b) => `<span class="up">↑ ${fmtBytes(a)}</span> · <span class="dn">↓ ${fmtBytes(b)}</span>`;
   const stat = (k, v, foot, ic, cls) => `<div class="stat ${cls}">
     <div class="k"><span class="chip ${cls}">${svg(ic)}</span>${k}</div>
     <div class="v">${v}</div><div class="foot">${foot}</div></div>`;
   holder.outerHTML = `<div class="stats">
     ${stat("Nodes", `${online}<small> / ${state.nodes.length} online</small>`, state.nodes.length ? `${state.nodes.length - online} offline` : "no nodes yet", "nodes", "blue")}
     ${stat("Users", `${active}<small> / ${state.users.length} active</small>`, overQuota ? `${overQuota} over quota` : "all within quota", "users", "green")}
-    ${stat("Traffic used", fmtBytes(totalUsed), "aggregate across all users", "traffic", "violet")}
+    ${stat("This month", fmtBytes(mup + mdn), `today ${fmtBytes(tup + tdn)}`, "traffic", "violet")}
+    ${stat("Traffic used", fmtBytes(up + down), split(up, down), "traffic", "cyan")}
     ${stat("Disabled", state.users.filter((u) => !u.enabled).length, "manually switched off", "slash", "amber")}
   </div>`;
 
-  // recent nodes + top users by usage
-  const nodeRows = state.nodes.slice(0, 6).map((n) => `<tr>
-    <td><span class="dot ${n.online ? "on" : "off"}"></span>${esc(n.name)}</td>
-    <td class="mono">${esc(n.address || "-")}</td>
-    <td>${n.online ? `<span class="pill on">online</span>` : `<span class="mut">offline · ${relTime(n.last_seen)}</span>`}</td></tr>`).join("");
-  const topUsers = [...state.users].sort((a, b) => Number(b.data_used || 0) - Number(a.data_used || 0)).slice(0, 6);
-  const userRows = topUsers.map((u) => `<tr>
-    <td><b>${esc(u.username)}</b></td>
-    <td style="min-width:180px">${usageCell(u)}</td></tr>`).join("");
-  const panels = $(`<div class="grid2">
-    <div><div class="sectlabel">Nodes</div>
-      <div class="card"><table><thead><tr><th>Name</th><th>Address</th><th>Status</th></tr></thead>
-      <tbody>${nodeRows || `<tr><td colspan="3" class="mut" style="text-align:center;padding:26px">No nodes yet</td></tr>`}</tbody></table></div></div>
-    <div><div class="sectlabel">Top users by traffic</div>
-      <div class="card"><table><thead><tr><th>User</th><th>Usage</th></tr></thead>
-      <tbody>${userRows || `<tr><td colspan="2" class="mut" style="text-align:center;padding:26px">No users yet</td></tr>`}</tbody></table></div></div>
+  // fleet-wide daily trend, stacked up/down
+  const trend = stats.trend || [];
+  const trendTotal = trend.reduce((s, d) => s + Number(d.up || 0) + Number(d.down || 0), 0);
+  main.appendChild($(`<div class="sectlabel">Fleet traffic — last ${trend.length} days</div>`));
+  const chartCard = $(`<div class="card" style="padding:16px 18px 12px">
+    ${fleetChart(trend)}
+    <div class="mut" style="font-size:12px;margin-top:6px">${trend.length}-day total ${fmtBytes(trendTotal)} · ${split(trend.reduce((s, d) => s + Number(d.up || 0), 0), trend.reduce((s, d) => s + Number(d.down || 0), 0))}</div>
   </div>`);
+  main.appendChild(chartCard);
+
+  // per-node (live + directional) + top-user traffic
+  const nodeRows = [...state.nodes]
+    .map((n) => ({ n, t: nodeAgg[n.id] || { up: 0, down: 0 } }))
+    .sort((a, b) => (Number(b.t.up) + Number(b.t.down)) - (Number(a.t.up) + Number(a.t.down)))
+    .slice(0, 8)
+    .map(({ n, t }) => {
+      const rate = Number(n.rate_bps || 0), clients = Number(n.clients || 0);
+      const label = `<span class="dot ${n.online ? "on" : "off"}"></span>${esc(n.name)}${clients ? ` <span class="mut" title="active clients (5m)">· ${clients}</span>` : ""}`;
+      const live = n.online && rate ? `<span class="live">${fmtRate(rate)}</span>` : `<span class="mut">—</span>`;
+      return `<tr data-node="${n.id}" class="rowlink"><td>${label}</td>
+        <td class="mono">${live}</td>
+        <td class="mono up">↑ ${fmtBytes(t.up)}</td>
+        <td class="mono dn">↓ ${fmtBytes(t.down)}</td>
+        <td class="mono"><b>${fmtBytes(Number(t.up) + Number(t.down))}</b></td></tr>`;
+    }).join("");
+  const userRows = [...state.users]
+    .map((u) => ({ u, t: userAgg[u.id] || { up: 0, down: 0 } }))
+    .sort((a, b) => (Number(b.t.up) + Number(b.t.down)) - (Number(a.t.up) + Number(a.t.down)))
+    .slice(0, 8)
+    .map(({ u, t }) => trafficRow(`<b>${esc(u.username)}</b>`, t.up, t.down)).join("");
+  const panels = $(`<div class="grid2">
+    <div><div class="sectlabel">Traffic by node</div>
+      <div class="card"><table><thead><tr><th>Node</th><th>Live</th><th>Up</th><th>Down</th><th>Total</th></tr></thead>
+      <tbody>${nodeRows || `<tr><td colspan="5" class="mut" style="text-align:center;padding:26px">No nodes yet</td></tr>`}</tbody></table></div></div>
+    <div><div class="sectlabel">Top users by traffic</div>
+      <div class="card"><table><thead><tr><th>User</th><th>Up</th><th>Down</th><th>Total</th></tr></thead>
+      <tbody>${userRows || `<tr><td colspan="4" class="mut" style="text-align:center;padding:26px">No users yet</td></tr>`}</tbody></table></div></div>
+  </div>`);
+  panels.querySelectorAll("tr[data-node]").forEach((tr) => tr.onclick = () => {
+    const n = state.nodes.find((x) => x.id == tr.dataset.node);
+    showNodeStats(tr.dataset.node, n);
+  });
   main.appendChild(panels);
+}
+
+// trafficRow renders a label plus an up / down / total byte breakdown.
+function trafficRow(label, up, down) {
+  up = Number(up || 0); down = Number(down || 0);
+  return `<tr><td>${label}</td>
+    <td class="mono up">↑ ${fmtBytes(up)}</td>
+    <td class="mono dn">↓ ${fmtBytes(down)}</td>
+    <td class="mono"><b>${fmtBytes(up + down)}</b></td></tr>`;
+}
+
+// fmtRate formats a bytes/second throughput as bits/second (network convention).
+function fmtRate(bytesPerSec) {
+  let bits = Number(bytesPerSec || 0) * 8;
+  const u = ["bps", "Kbps", "Mbps", "Gbps"]; let i = 0;
+  while (bits >= 1000 && i < u.length - 1) { bits /= 1000; i++; }
+  return bits.toFixed(bits < 10 && i ? 1 : 0) + " " + u[i];
+}
+
+// fleetChart renders a stacked (download over upload) daily bar chart.
+function fleetChart(hist) {
+  const W = 900, H = 150, pad = 24;
+  if (!hist.length) return `<div class="mut" style="text-align:center;padding:30px">No traffic yet</div>`;
+  const tot = hist.map((d) => Number(d.up || 0) + Number(d.down || 0));
+  const max = Math.max(1, ...tot);
+  const bw = (W - pad * 2) / hist.length;
+  const bars = hist.map((d, i) => {
+    const u = Number(d.up || 0), dn = Number(d.down || 0);
+    const hU = Math.round((H - pad * 2) * (u / max));
+    const hD = Math.round((H - pad * 2) * (dn / max));
+    const x = pad + i * bw + 1, wd = Math.max(1, bw - 2);
+    const yD = H - pad - hD, yU = yD - hU;
+    const t = esc(`${d.day}: ↑ ${fmtBytes(u)} · ↓ ${fmtBytes(dn)}`);
+    return `<g><title>${t}</title>
+      <rect x="${x.toFixed(1)}" y="${yD}" width="${wd.toFixed(1)}" height="${hD}" fill="#b79bff"/>
+      <rect x="${x.toFixed(1)}" y="${yU}" width="${wd.toFixed(1)}" height="${hU}" fill="#9db0ff"/></g>`;
+  }).join("");
+  const first = hist[0].day.slice(5), last = hist[hist.length - 1].day.slice(5);
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:100%">
+    <line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" stroke="var(--line2)"/>
+    ${bars}
+    <text x="${pad}" y="${H - 6}" fill="var(--mut2)" font-size="11">${first}</text>
+    <text x="${W - pad}" y="${H - 6}" fill="var(--mut2)" font-size="11" text-anchor="end">${last}</text>
+    <text x="${pad}" y="14" fill="var(--mut2)" font-size="11">peak ${fmtBytes(max)}/day · <tspan fill="#9db0ff">↑ up</tspan> <tspan fill="#b79bff">↓ down</tspan></text>
+  </svg>`;
+}
+
+// showNodeStats opens a node's daily traffic trend.
+async function showNodeStats(id, n) {
+  n = n || {};
+  const f = $(`<div class="modal" style="max-width:640px">
+    <h3>Traffic — ${esc(n.name || "node")}</h3>
+    <p class="hint">Daily usage (UTC), last 30 days. Per-node history begins when the node started reporting under this version.</p>
+    <div id="chart" class="mut" style="padding:20px 0;text-align:center">Loading…</div>
+    <div class="actions"><button class="primary" id="ok">Close</button></div>
+  </div>`);
+  const bg = modal(f);
+  f.querySelector("#ok").onclick = () => bg.remove();
+  try {
+    const hist = await api("/api/nodes/" + id + "/traffic-history?days=30");
+    const total = hist.reduce((s, d) => s + Number(d.up || 0) + Number(d.down || 0), 0);
+    f.querySelector("#chart").outerHTML = `<div>${fleetChart(hist)}<div class="mut" style="font-size:12px;margin-top:8px">30-day total: ${fmtBytes(total)}</div></div>`;
+  } catch (e) { f.querySelector("#chart").textContent = e.message; }
 }
 
 function usageCell(u) {
@@ -208,7 +305,11 @@ function usageCell(u) {
   if (!u.data_limit) return `<span class="mono">${fmtBytes(used)}</span> <span class="mut">/ ∞</span>`;
   const pct = Math.min(100, Math.round(used / u.data_limit * 100));
   const cls = pct >= 100 ? "bad" : pct >= 80 ? "warn" : "";
-  return `<div><span class="mono">${fmtBytes(used)}</span> <span class="mut">/ ${fmtBytes(u.data_limit)} (${pct}%)</span>
+  const eta = Number(u.eta_days || 0);
+  const etaTag = eta && eta <= 14
+    ? ` <span class="pill warn" title="projected from the last 7 days' average">~${eta}d to quota</span>`
+    : "";
+  return `<div><span class="mono">${fmtBytes(used)}</span> <span class="mut">/ ${fmtBytes(u.data_limit)} (${pct}%)</span>${etaTag}
     <div class="prog ${cls}"><i style="width:${pct}%"></i></div></div>`;
 }
 
@@ -250,6 +351,8 @@ function nodeHealth(n) {
   const m = n.metrics;
   if (!n.online || !m) return `<span class="mut">—</span>`;
   const parts = [];
+  if (n.rate_bps) parts.push(`<span class="live" title="current throughput">${fmtRate(n.rate_bps)}</span>`);
+  if (n.clients) parts.push(`<span class="mut" title="active clients (last 5m)">${n.clients} client${n.clients > 1 ? "s" : ""}</span>`);
   parts.push(`<span class="mut" title="1-min load average">load ${(+m.load_avg || 0).toFixed(2)}</span>`);
   parts.push(`<span class="mut" title="memory used">mem ${m.mem_used_pct || 0}%</span>`);
   if (m.xray_version) parts.push(`<span class="mut" title="Xray version">xray ${esc(m.xray_version)}</span>`);
@@ -527,18 +630,31 @@ function barChart(hist) {
 
 async function showStats(id, u) {
   u = u || {};
-  const f = $(`<div class="modal">
+  const nodeName = (nid) => { const n = state.nodes.find((x) => x.id == nid); return n ? n.name : "#" + nid; };
+  const f = $(`<div class="modal" style="max-width:560px">
     <h3>Traffic — ${esc(u.username || "")}</h3>
     <p class="hint">Daily usage (UTC), last 30 days.</p>
     <div id="chart" class="mut" style="padding:20px 0;text-align:center">Loading…</div>
+    <div class="sectlabel" style="margin-top:18px">By node</div>
+    <div id="bynode" class="mut" style="padding:6px 0">Loading…</div>
     <div class="actions"><button class="primary" id="ok">Close</button></div>
   </div>`);
   const bg = modal(f);
   f.querySelector("#ok").onclick = () => bg.remove();
   try {
-    const hist = await api("/api/users/" + id + "/traffic-history?days=30");
+    const [hist, byNode] = await Promise.all([
+      api("/api/users/" + id + "/traffic-history?days=30"),
+      api("/api/users/" + id + "/traffic-nodes"),
+    ]);
     const total = hist.reduce((s, d) => s + Number(d.up || 0) + Number(d.down || 0), 0);
     f.querySelector("#chart").outerHTML = `<div>${barChart(hist)}<div class="mut" style="font-size:12px;margin-top:8px">30-day total: ${fmtBytes(total)}</div></div>`;
+    if (!byNode || !byNode.length) {
+      f.querySelector("#bynode").textContent = "No per-node traffic yet.";
+    } else {
+      const rows = byNode.map((n) => trafficRow(esc(nodeName(n.node_id)), n.up, n.down)).join("");
+      f.querySelector("#bynode").outerHTML = `<div class="card" style="box-shadow:none"><table>
+        <thead><tr><th>Node</th><th>Up</th><th>Down</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    }
   } catch (e) { f.querySelector("#chart").textContent = e.message; }
 }
 

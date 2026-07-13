@@ -89,6 +89,7 @@
   .chip.green { background:rgba(61,220,151,.15); color:var(--ok); } .stat.green { --accent:var(--ok); }
   .chip.violet { background:rgba(139,92,246,.17); color:#b79bff; } .stat.violet { --accent:#8b5cf6; }
   .chip.amber { background:rgba(247,185,85,.15); color:var(--warn); } .stat.amber { --accent:var(--warn); }
+  .chip.cyan { background:rgba(56,189,208,.16); color:#67d6e6; } .stat.cyan { --accent:#38bdd0; }
 
   .card { background:var(--panel); border:1px solid var(--line); border-radius:var(--r); overflow:hidden; box-shadow:var(--shadow-sm); }
   .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:18px; align-items:start; }
@@ -112,6 +113,9 @@
   .pill.off { color:var(--bad); border-color:rgba(255,107,125,.35); background:rgba(255,107,125,.09); }
   .pill.warn { color:var(--warn); border-color:rgba(247,185,85,.35); background:rgba(247,185,85,.09); }
   .tag { font-size:11.5px; padding:2px 9px; border-radius:7px; background:var(--panel2); border:1px solid var(--line2); color:var(--mut); margin:0 4px 4px 0; display:inline-block; }
+  .up { color:#9db0ff; } .dn { color:#b79bff; }
+  .live { color:#67d6e6; font-weight:600; }
+  tr.rowlink { cursor:pointer; } tr.rowlink:hover td { background:var(--panel2); }
 
   /* ---------- progress ---------- */
   .prog { height:6px; border-radius:6px; background:var(--line); overflow:hidden; margin-top:6px; min-width:120px; }

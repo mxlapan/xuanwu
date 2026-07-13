@@ -110,6 +110,7 @@ func (a *App) handleListNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	online := a.hub.OnlineNodeIDs()
+	clients, _ := a.store.NodeClientCounts(time.Now().Unix() - 300)
 	out := make([]map[string]any, 0, len(nodes))
 	for _, n := range nodes {
 		out = append(out, map[string]any{
@@ -119,6 +120,8 @@ func (a *App) handleListNodes(w http.ResponseWriter, r *http.Request) {
 			"reality_public_key": n.RealityPublicKey, "reality_short_id": n.RealityShortID,
 			"tls_domain": n.TLSDomain,
 			"metrics":    a.getNodeMetrics(n.ID),
+			"rate_bps":   a.getNodeRate(n.ID),
+			"clients":    clients[n.ID],
 		})
 	}
 	writeJSON(w, 200, out)
@@ -233,6 +236,14 @@ func (a *App) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	if counts, err := a.store.DeviceCounts(time.Now().AddDate(0, 0, -30).Unix()); err == nil {
 		for _, u := range users {
 			u.DeviceCount = counts[u.ID]
+		}
+	}
+	// Project days-to-quota from the last 7 days' average daily usage.
+	if avg, err := a.store.RecentDailyAvg(7); err == nil {
+		for _, u := range users {
+			if a := avg[u.ID]; u.DataLimit > 0 && u.DataUsed < u.DataLimit && a > 0 {
+				u.EtaDays = (u.DataLimit - u.DataUsed + a - 1) / a
+			}
 		}
 	}
 	writeJSON(w, 200, users)
@@ -497,6 +508,87 @@ func (a *App) handleUserTrafficHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, hist)
+}
+
+// handleStats returns fleet-wide traffic broken down by node and per user, with
+// an uplink/downlink split — richer than the single aggregate figure. Node and
+// user names are resolved client-side from the existing lists.
+func (a *App) handleStats(w http.ResponseWriter, r *http.Request) {
+	nodeAgg, err := a.store.NodeTrafficTotals()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	userAgg, err := a.store.UserTrafficTotals()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	var total TrafficSplit
+	for _, n := range nodeAgg {
+		total.Up += n.Up
+		total.Down += n.Down
+	}
+	period, err := a.store.PeriodTotals()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	days := 30
+	if q := r.URL.Query().Get("days"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 && n <= 365 {
+			days = n
+		}
+	}
+	trend, err := a.store.FleetDaily(days)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"total": total,
+		"today": period.Today,
+		"month": period.Month,
+		"trend": trend,
+		"nodes": nodeAgg,
+		"users": userAgg,
+	})
+}
+
+// handleNodeTrafficHistory returns a node's daily usage series for charting.
+func (a *App) handleNodeTrafficHistory(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, 400, "bad id")
+		return
+	}
+	days := int64(30)
+	if q := r.URL.Query().Get("days"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 && n <= 365 {
+			days = int64(n)
+		}
+	}
+	hist, err := a.store.NodeDaily(id, days)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, hist)
+}
+
+// handleUserTrafficNodes returns one user's current usage split by node.
+func (a *App) handleUserTrafficNodes(w http.ResponseWriter, r *http.Request) {
+	id, err := pathID(r)
+	if err != nil {
+		writeErr(w, 400, "bad id")
+		return
+	}
+	rows, err := a.store.UserTrafficByNode(id)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, rows)
 }
 
 // handleSetPortalPassword sets (or clears, when the password is empty) a user's

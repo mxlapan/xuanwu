@@ -80,6 +80,13 @@ CREATE TABLE IF NOT EXISTS traffic_daily (
 	down INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (user_id, day)
 );
+CREATE TABLE IF NOT EXISTS node_traffic_daily (
+	node_id INTEGER NOT NULL,
+	day TEXT NOT NULL,               -- YYYY-MM-DD (UTC)
+	up INTEGER NOT NULL DEFAULT 0,
+	down INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (node_id, day)
+);
 CREATE TABLE IF NOT EXISTS audit_log (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	ts INTEGER NOT NULL,
@@ -429,6 +436,25 @@ func (s *Store) DeviceCounts(since int64) (map[int64]int, error) {
 	return out, rows.Err()
 }
 
+// NodeClientCounts returns the number of distinct client IPs seen per node since
+// `since`, i.e. the clients currently active on each node.
+func (s *Store) NodeClientCounts(since int64) (map[int64]int64, error) {
+	rows, err := s.db.Query(`SELECT node_id, COUNT(DISTINCT ip) FROM user_devices WHERE last_seen>=? GROUP BY node_id`, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]int64{}
+	for rows.Next() {
+		var nid, n int64
+		if err := rows.Scan(&nid, &n); err != nil {
+			return nil, err
+		}
+		out[nid] = n
+	}
+	return out, rows.Err()
+}
+
 // ---- audit ----
 
 // AuditEntry is one recorded admin action.
@@ -543,6 +569,9 @@ func (s *Store) DeleteNode(id int64) error {
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM node_traffic WHERE node_id=?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM node_traffic_daily WHERE node_id=?`, id); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM nodes WHERE id=?`, id); err != nil {
@@ -726,6 +755,12 @@ func (s *Store) TrafficHistory(userID int64, days int) ([]DailyTraffic, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	return fillDaily(byDay, days), nil
+}
+
+// fillDaily turns a day->usage map into an oldest-first series of length days,
+// zero-filling days with no traffic so charts have a continuous x-axis.
+func fillDaily(byDay map[string]DailyTraffic, days int) []DailyTraffic {
 	out := make([]DailyTraffic, 0, days)
 	for i := days - 1; i >= 0; i-- {
 		day := time.Now().UTC().AddDate(0, 0, -i).Format("2006-01-02")
@@ -735,7 +770,176 @@ func (s *Store) TrafficHistory(userID int64, days int) ([]DailyTraffic, error) {
 			out = append(out, DailyTraffic{Day: day})
 		}
 	}
-	return out, nil
+	return out
+}
+
+// FleetDaily returns fleet-wide daily usage (summed across all users) for the
+// last `days` days, oldest first and zero-filled.
+func (s *Store) FleetDaily(days int) ([]DailyTraffic, error) {
+	if days < 1 {
+		days = 30
+	}
+	since := time.Now().UTC().AddDate(0, 0, -days+1).Format("2006-01-02")
+	rows, err := s.db.Query(`SELECT day, SUM(up), SUM(down) FROM traffic_daily WHERE day>=? GROUP BY day`, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byDay := map[string]DailyTraffic{}
+	for rows.Next() {
+		var d DailyTraffic
+		if err := rows.Scan(&d.Day, &d.Up, &d.Down); err != nil {
+			return nil, err
+		}
+		byDay[d.Day] = d
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return fillDaily(byDay, days), nil
+}
+
+// NodeDaily returns one node's daily usage for the last `days` days. Per-node
+// daily accounting starts when this feature ships, so older days read as zero.
+func (s *Store) NodeDaily(nodeID, days int64) ([]DailyTraffic, error) {
+	if days < 1 {
+		days = 30
+	}
+	since := time.Now().UTC().AddDate(0, 0, int(-days+1)).Format("2006-01-02")
+	rows, err := s.db.Query(`SELECT day, up, down FROM node_traffic_daily WHERE node_id=? AND day>=? ORDER BY day`, nodeID, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byDay := map[string]DailyTraffic{}
+	for rows.Next() {
+		var d DailyTraffic
+		if err := rows.Scan(&d.Day, &d.Up, &d.Down); err != nil {
+			return nil, err
+		}
+		byDay[d.Day] = d
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return fillDaily(byDay, int(days)), nil
+}
+
+// PeriodStats holds today's and this calendar month's fleet usage (UTC).
+type PeriodStats struct {
+	Today TrafficSplit `json:"today"`
+	Month TrafficSplit `json:"month"`
+}
+
+// PeriodTotals returns fleet usage for today and for the current month to date.
+func (s *Store) PeriodTotals() (PeriodStats, error) {
+	now := time.Now().UTC()
+	today := now.Format("2006-01-02")
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
+	var ps PeriodStats
+	if err := s.db.QueryRow(`SELECT COALESCE(SUM(up),0),COALESCE(SUM(down),0) FROM traffic_daily WHERE day=?`, today).
+		Scan(&ps.Today.Up, &ps.Today.Down); err != nil {
+		return ps, err
+	}
+	err := s.db.QueryRow(`SELECT COALESCE(SUM(up),0),COALESCE(SUM(down),0) FROM traffic_daily WHERE day>=?`, monthStart).
+		Scan(&ps.Month.Up, &ps.Month.Down)
+	return ps, err
+}
+
+// RecentDailyAvg returns each user's average bytes/day over the last `days`
+// days, used to project when a user will hit their quota.
+func (s *Store) RecentDailyAvg(days int) (map[int64]int64, error) {
+	if days < 1 {
+		days = 7
+	}
+	since := time.Now().UTC().AddDate(0, 0, -days+1).Format("2006-01-02")
+	rows, err := s.db.Query(`SELECT user_id, SUM(up+down) FROM traffic_daily WHERE day>=? GROUP BY user_id`, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]int64{}
+	for rows.Next() {
+		var uid, total int64
+		if err := rows.Scan(&uid, &total); err != nil {
+			return nil, err
+		}
+		out[uid] = total / int64(days)
+	}
+	return out, rows.Err()
+}
+
+// TrafficSplit is an uplink/downlink byte pair.
+type TrafficSplit struct {
+	Up   int64 `json:"up"`
+	Down int64 `json:"down"`
+}
+
+// NodeUsage aggregates current traffic on one node across all its users.
+type NodeUsage struct {
+	NodeID int64 `json:"node_id"`
+	Up     int64 `json:"up"`
+	Down   int64 `json:"down"`
+	Users  int64 `json:"users"`
+}
+
+// NodeTrafficTotals returns per-node uplink/downlink totals and the number of
+// users that generated traffic on each node.
+func (s *Store) NodeTrafficTotals() ([]NodeUsage, error) {
+	rows, err := s.db.Query(`SELECT node_id, SUM(up), SUM(down), COUNT(DISTINCT user_id)
+		FROM node_traffic GROUP BY node_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []NodeUsage
+	for rows.Next() {
+		var n NodeUsage
+		if err := rows.Scan(&n.NodeID, &n.Up, &n.Down, &n.Users); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// UserTrafficTotals returns each user's current uplink/downlink split, summed
+// across the nodes they use.
+func (s *Store) UserTrafficTotals() (map[int64]TrafficSplit, error) {
+	rows, err := s.db.Query(`SELECT user_id, SUM(up), SUM(down) FROM node_traffic GROUP BY user_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]TrafficSplit{}
+	for rows.Next() {
+		var uid int64
+		var t TrafficSplit
+		if err := rows.Scan(&uid, &t.Up, &t.Down); err != nil {
+			return nil, err
+		}
+		out[uid] = t
+	}
+	return out, rows.Err()
+}
+
+// UserTrafficByNode returns one user's current usage split by node, busiest first.
+func (s *Store) UserTrafficByNode(userID int64) ([]NodeUsage, error) {
+	rows, err := s.db.Query(`SELECT node_id, up, down FROM node_traffic
+		WHERE user_id=? AND (up+down) > 0 ORDER BY (up+down) DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []NodeUsage
+	for rows.Next() {
+		var n NodeUsage
+		if err := rows.Scan(&n.NodeID, &n.Up, &n.Down); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) DeleteUser(id int64) error {
@@ -821,6 +1025,11 @@ func (s *Store) AddTraffic(userID, nodeID, up, down int64) error {
 		userID, day, up, down, up, down); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`INSERT INTO node_traffic_daily(node_id,day,up,down) VALUES(?,?,?,?)
+		ON CONFLICT(node_id,day) DO UPDATE SET up=up+?,down=down+?`,
+		nodeID, day, up, down, up, down); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -847,10 +1056,21 @@ func (s *Store) ChangeUserPortalPassword(userID int64, hash string) error {
 	return err
 }
 
-// ResetUserTraffic zeroes a user's aggregate usage (e.g. monthly reset).
+// ResetUserTraffic zeroes a user's aggregate usage and per-node breakdown (e.g.
+// monthly reset), keeping the two consistent. Daily history is preserved.
 func (s *Store) ResetUserTraffic(userID int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.db.Exec(`UPDATE users SET data_used=0 WHERE id=?`, userID)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE users SET data_used=0 WHERE id=?`, userID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM node_traffic WHERE user_id=?`, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

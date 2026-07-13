@@ -29,6 +29,9 @@ type User struct {
 	MustChangePW bool `json:"must_change_pw"`
 	// DeviceCount is distinct source IPs seen recently; populated on list.
 	DeviceCount int `json:"device_count"`
+	// EtaDays projects days until the quota is hit at the recent daily rate;
+	// 0 means unlimited, idle, or already over. Populated on list.
+	EtaDays int64 `json:"eta_days,omitempty"`
 	// Note is an admin-only remark. It is returned by admin endpoints only and
 	// is never exposed to the portal or in subscriptions.
 	Note string `json:"note"`
