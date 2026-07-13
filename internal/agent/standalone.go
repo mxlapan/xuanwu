@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"xuanwu/internal/xrayconf"
+	"xuanwu/internal/nodeconf"
 )
 
 // standaloneEnv are the node's own REALITY/TLS parameters, read from the
@@ -43,11 +43,11 @@ func applyStandalone(c Config, se standaloneEnv) error {
 	if err != nil {
 		return err
 	}
-	clients := make([]xrayconf.Client, 0, len(db.Users))
+	clients := make([]nodeconf.Client, 0, len(db.Users))
 	for _, u := range db.Users {
-		clients = append(clients, xrayconf.Client{UUID: u.UUID, Email: u.Name})
+		clients = append(clients, nodeconf.Client{UUID: u.UUID, Email: u.Name})
 	}
-	cfg := xrayconf.Build(xrayconf.NodeParams{
+	cfg := nodeconf.Build(nodeconf.NodeParams{
 		RealityDest:       se.realityDest,
 		RealityServerName: se.realityServerName,
 		RealityPrivateKey: se.realityPrivateKey,

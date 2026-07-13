@@ -164,13 +164,23 @@ func ConfigFromEnv() Config {
 
 // validateSecrets fails closed on weak/default credentials.
 func validateSecrets(cfg Config) error {
+	if err := validateUsername(cfg.AdminUser); err != nil {
+		return fmt.Errorf("PANEL_ADMIN_USER invalid: %w", err)
+	}
 	if !cfg.AllowWeakPass {
 		if err := validatePasswordStrength(cfg.AdminPass); err != nil {
 			return fmt.Errorf("PANEL_ADMIN_PASS is too weak: %w "+
 				"(or set PANEL_ALLOW_WEAK_PASS=1 to override for local testing)", err)
 		}
 	}
-	if cfg.JWTSecret != "" && (cfg.JWTSecret == "replace-with-64-hex-chars" || len(cfg.JWTSecret) < 16) {
+	// A stable secret is mandatory: it signs sessions (which must survive a
+	// restart) and derives the key that encrypts secret DB columns at rest, so
+	// an ephemeral one would orphan every encrypted value on the next boot.
+	if cfg.JWTSecret == "" {
+		return fmt.Errorf("PANEL_JWT_SECRET is required " +
+			"(it signs sessions and keys at-rest encryption); generate one with: openssl rand -hex 32")
+	}
+	if cfg.JWTSecret == "replace-with-64-hex-chars" || len(cfg.JWTSecret) < 16 {
 		return fmt.Errorf("PANEL_JWT_SECRET is the placeholder or too short (<16 chars); " +
 			"generate one with: openssl rand -hex 32")
 	}
@@ -196,16 +206,18 @@ func Run(cfg Config) error {
 	if err := validateSecrets(cfg); err != nil {
 		return err
 	}
-	if cfg.JWTSecret == "" {
-		cfg.JWTSecret = randToken(32)
-		log.Printf("PANEL_JWT_SECRET not set; generated an ephemeral one (sessions reset on restart)")
-	}
 
 	store, err := OpenStore(cfg.DBPath)
 	if err != nil {
 		return err
 	}
 	defer store.Close()
+	// Enable at-rest encryption of secret columns, then migrate any legacy
+	// plaintext left by an earlier version.
+	store.crypt = newCrypter(cfg.JWTSecret)
+	if err := store.encryptExisting(); err != nil {
+		return fmt.Errorf("encrypt existing secrets: %w", err)
+	}
 
 	hash, err := hashPassword(cfg.AdminPass)
 	if err != nil {
@@ -239,7 +251,7 @@ func Run(cfg Config) error {
 
 	// Load Telegram config: a value set in the panel (DB) overrides the env seed.
 	tok := cfg.TelegramToken
-	if v, found, _ := store.GetSetting("telegram_token"); found {
+	if v, found, _ := store.GetSecretSetting("telegram_token"); found {
 		tok = v
 	}
 	adm := cfg.TelegramAdms

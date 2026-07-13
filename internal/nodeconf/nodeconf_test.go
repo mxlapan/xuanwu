@@ -1,4 +1,4 @@
-package xrayconf
+package nodeconf
 
 import "testing"
 

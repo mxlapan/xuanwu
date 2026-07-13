@@ -134,6 +134,10 @@ func (a *App) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "name required")
 		return
 	}
+	if err := validateNode(&n); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	n.Token = randToken(24)
 	// TLS-Vision is opt-in: an empty tls_domain means REALITY only (no cert).
 	id, err := a.store.CreateNode(&n)
@@ -169,6 +173,10 @@ func (a *App) handleUpdateNode(w http.ResponseWriter, r *http.Request) {
 	n.Token = oldToken
 	if strings.TrimSpace(n.RealityPrivateKey) == "" {
 		n.RealityPrivateKey = oldPriv
+	}
+	if err := validateNode(n); err != nil {
+		writeErr(w, 400, err.Error())
+		return
 	}
 	if err := a.store.UpdateNode(n); err != nil {
 		writeErr(w, 500, err.Error())
@@ -259,8 +267,9 @@ func (a *App) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "bad body")
 		return
 	}
-	if strings.TrimSpace(body.Username) == "" {
-		writeErr(w, 400, "username required")
+	body.Username = strings.TrimSpace(body.Username)
+	if err := validateUsername(body.Username); err != nil {
+		writeErr(w, 400, err.Error())
 		return
 	}
 	if body.ResetDay < 0 || body.ResetDay > 28 {

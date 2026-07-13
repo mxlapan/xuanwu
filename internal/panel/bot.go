@@ -207,6 +207,9 @@ func (a *App) botAddUser(args []string) string {
 		return "usage: /adduser <name> [limitGB] [days]"
 	}
 	name := args[0]
+	if err := validateUsername(name); err != nil {
+		return "error: " + err.Error()
+	}
 	if _, err := a.store.GetUserByName(name); err == nil {
 		return "user already exists"
 	}

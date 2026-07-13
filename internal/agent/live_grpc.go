@@ -15,7 +15,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// inbound tags that carry VLESS users; must match xrayconf.Build.
+// inbound tags that carry the proxy users; must match nodeconf.Build.
 const (
 	tagTLS     = "vless-xtls-vision"
 	tagReality = "vless-reality-vision"

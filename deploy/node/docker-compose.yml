@@ -87,16 +87,44 @@ services:
       XRAY_CERT: /etc/xray/certs/fullchain.pem
       XRAY_ACCESS_LOG: /var/log/xray/access.log
       STATS_INTERVAL: ${STATS_INTERVAL:-60}
+      # Restart/inspect Xray + nginx via the hardened proxy instead of a direct
+      # socket mount — the agent never gets root-equivalent Docker access.
+      DOCKER_HOST: tcp://dockerproxy:2375
     volumes:
       - ./data/xray/config.json:/etc/xray/config.json
       - ./data:/data
       - ./certs:/etc/xray/certs:ro       # watch for cert renewals
       - ./logs/xray:/var/log/xray:ro     # read access log for device tracking
-      - /var/run/docker.sock:/var/run/docker.sock
     networks: [xuanwu-net]
     depends_on:
       xray:
         condition: service_started
+      dockerproxy:
+        condition: service_started
+
+  # Allow-listed Docker-socket proxy. It holds the ONLY mount of docker.sock and
+  # forwards nothing but inspect + restart on the two named containers (plus the
+  # CLI's read-only ping/version probes). This is what lets the agent — which
+  # applies panel-pushed config — run without host-root Docker access, so a
+  # compromised agent or panel cannot create a privileged container to escape.
+  dockerproxy:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.agent
+    image: xuanwu-agent:latest
+    container_name: xuanwu-dockerproxy
+    restart: always
+    command: ["dockerproxy"]
+    environment:
+      DOCKERPROXY_LISTEN: ":2375"
+      DOCKERPROXY_ALLOW: "xray,nginx-edge"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    expose: ["2375"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [xuanwu-net]
 
   # Automatic TLS via acme.sh (Let's Encrypt). Always runs and stays idle until a
   # TLS domain appears: the agent writes it (from the panel in managed mode, or

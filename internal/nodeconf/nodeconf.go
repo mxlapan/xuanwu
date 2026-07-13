@@ -1,7 +1,8 @@
-// Package xrayconf builds the Xray config.json used by every node. It is shared
-// by the panel (which generates configs centrally and pushes them) and the agent
-// in standalone mode (which generates its own config locally, with no panel).
-package xrayconf
+// Package nodeconf builds the engine config.json used by every node. It is
+// shared by the panel (which generates configs centrally and pushes them) and
+// the agent in standalone mode (which generates its own config locally, with no
+// panel).
+package nodeconf
 
 // Client is one provisioned VLESS user on a node.
 type Client struct {

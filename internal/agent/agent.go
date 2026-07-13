@@ -30,8 +30,7 @@ type Config struct {
 	Token         string
 	XrayConfig    string        // path to the shared config.json this agent writes
 	XrayContainer string        // docker container name of xray
-	APIServer     string        // xray api for statsquery via docker exec, e.g. 127.0.0.1:10085
-	GRPCAddr      string        // xray api reachable from the agent for live edits, e.g. xray:10085
+	GRPCAddr      string        // xray api reachable from the agent for live edits + stats, e.g. xray:10085
 	CertPath      string        // TLS cert file to watch for renewals ("" disables)
 	StatsInterval time.Duration // traffic sampling interval
 
@@ -90,7 +89,6 @@ func ConfigFromEnv() Config {
 		Token:          env("NODE_TOKEN", ""),
 		XrayConfig:     env("XRAY_CONFIG", "/etc/xray/config.json"),
 		XrayContainer:  env("XRAY_CONTAINER", "xray"),
-		APIServer:      env("XRAY_API", "127.0.0.1:10085"),
 		GRPCAddr:       env("XRAY_GRPC", "xray:10085"),
 		CertPath:       env("XRAY_CERT", "/etc/xray/certs/fullchain.pem"),
 		AccessLog:      env("XRAY_ACCESS_LOG", "/var/log/xray/access.log"),

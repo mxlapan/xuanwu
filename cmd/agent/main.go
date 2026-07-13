@@ -19,6 +19,9 @@ Standalone user management:
   xuanwu-agent user rm <name>        remove a user
   xuanwu-agent user list             list local users
   xuanwu-agent apply                 regenerate config and reload xray
+
+Sidecar:
+  xuanwu-agent dockerproxy           allow-listed Docker-socket proxy (inspect/restart only)
 `
 
 func main() {
@@ -38,6 +41,11 @@ func main() {
 		case "user", "apply":
 			if err := agent.RunCLI(agent.ConfigFromEnv(), args); err != nil {
 				log.Fatalf("%v", err)
+			}
+			return
+		case "dockerproxy":
+			if err := agent.RunDockerProxy(); err != nil {
+				log.Fatalf("dockerproxy: %v", err)
 			}
 			return
 		case "-h", "--help", "help":

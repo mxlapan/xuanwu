@@ -13,8 +13,9 @@ import (
 // Store wraps the SQLite database. A single process-wide write mutex keeps the
 // (default) SQLite file happy under concurrent HTTP + websocket goroutines.
 type Store struct {
-	db *sql.DB
-	mu sync.Mutex
+	db    *sql.DB
+	mu    sync.Mutex
+	crypt *crypter // encrypts secret columns at rest; nil = plaintext (tests)
 }
 
 const schema = `
@@ -169,6 +170,90 @@ func (s *Store) SetSetting(key, value string) error {
 	return err
 }
 
+// GetSecretSetting reads a settings value that is stored encrypted at rest (e.g.
+// the Telegram bot token), returning its plaintext.
+func (s *Store) GetSecretSetting(key string) (string, bool, error) {
+	v, ok, err := s.GetSetting(key)
+	if err != nil || !ok {
+		return "", ok, err
+	}
+	return s.crypt.decrypt(v), true, nil
+}
+
+// SetSecretSetting upserts a settings value, encrypting it at rest.
+func (s *Store) SetSecretSetting(key, value string) error {
+	return s.SetSetting(key, s.crypt.encrypt(value))
+}
+
+// encryptExisting re-encrypts secret columns that were written before at-rest
+// encryption was enabled (legacy plaintext). It is idempotent — values already
+// carrying the encryption marker are skipped — and a no-op without a crypter.
+func (s *Store) encryptExisting() error {
+	if s.crypt == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.reencryptColumn(`SELECT id, reality_private_key FROM nodes`,
+		`UPDATE nodes SET reality_private_key=? WHERE id=?`); err != nil {
+		return err
+	}
+	if err := s.reencryptColumn(`SELECT id, totp_secret FROM admins`,
+		`UPDATE admins SET totp_secret=? WHERE id=?`); err != nil {
+		return err
+	}
+	// settings.telegram_token is a single string-keyed row.
+	var v string
+	err := s.db.QueryRow(`SELECT value FROM settings WHERE key='telegram_token'`).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if v != "" && !isEncrypted(v) {
+		_, err = s.db.Exec(`UPDATE settings SET value=? WHERE key='telegram_token'`, s.crypt.encrypt(v))
+	}
+	return err
+}
+
+// reencryptColumn encrypts every legacy-plaintext value returned by sel (which
+// must select `id, value`) using upd (`... SET col=? WHERE id=?`). Rows are read
+// fully before any write, since the single SQLite connection can't stream a query
+// and execute updates at once. Caller holds s.mu.
+func (s *Store) reencryptColumn(sel, upd string) error {
+	rows, err := s.db.Query(sel)
+	if err != nil {
+		return err
+	}
+	type item struct {
+		id  int64
+		val string
+	}
+	var todo []item
+	for rows.Next() {
+		var id int64
+		var v string
+		if err := rows.Scan(&id, &v); err != nil {
+			rows.Close()
+			return err
+		}
+		if v != "" && !isEncrypted(v) {
+			todo = append(todo, item{id, v})
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, it := range todo {
+		if _, err := s.db.Exec(upd, s.crypt.encrypt(it.val), it.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // BackupTo writes a consistent snapshot of the database to path (which must not
 // already exist), using SQLite's VACUUM INTO.
 func (s *Store) BackupTo(path string) error {
@@ -180,6 +265,9 @@ func (s *Store) BackupTo(path string) error {
 
 // ---- admins ----
 
+// EnsureAdmin creates the bootstrap admin on first boot only. Once the admin
+// exists, the database is authoritative: a password changed in the panel is
+// never overwritten by the (seed-only) PANEL_ADMIN_PASS on later restarts.
 func (s *Store) EnsureAdmin(username, passwordHash string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -189,12 +277,7 @@ func (s *Store) EnsureAdmin(username, passwordHash string) error {
 		_, err = s.db.Exec(`INSERT INTO admins(username,password_hash) VALUES(?,?)`, username, passwordHash)
 		return err
 	}
-	if err != nil {
-		return err
-	}
-	// keep password in sync with env on boot
-	_, err = s.db.Exec(`UPDATE admins SET password_hash=? WHERE id=?`, passwordHash, id)
-	return err
+	return err // exists: leave the stored password (and hash) untouched
 }
 
 func (s *Store) GetAdmin(username string) (*Admin, error) {
@@ -206,6 +289,7 @@ func (s *Store) GetAdmin(username string) (*Admin, error) {
 		return nil, err
 	}
 	a.TOTPEnabled = enabled != 0
+	a.TOTPSecret = s.crypt.decrypt(a.TOTPSecret)
 	return a, nil
 }
 
@@ -233,7 +317,7 @@ func (s *Store) SetAdminTOTP(username, secret string, enabled bool) error {
 	if enabled {
 		e = 1
 	}
-	_, err := s.db.Exec(`UPDATE admins SET totp_secret=?,totp_enabled=? WHERE username=?`, secret, e, username)
+	_, err := s.db.Exec(`UPDATE admins SET totp_secret=?,totp_enabled=? WHERE username=?`, s.crypt.encrypt(secret), e, username)
 	return err
 }
 
@@ -386,7 +470,7 @@ func (s *Store) ListAudit(limit int) ([]AuditEntry, error) {
 
 // ---- nodes ----
 
-func scanNode(sc interface{ Scan(...any) error }) (*Node, error) {
+func (s *Store) scanNode(sc interface{ Scan(...any) error }) (*Node, error) {
 	n := &Node{}
 	err := sc.Scan(&n.ID, &n.Name, &n.Token, &n.Address, &n.Remark, &n.LastSeen, &n.CreatedAt,
 		&n.RealityDest, &n.RealityServerName, &n.RealityPrivateKey, &n.RealityPublicKey,
@@ -394,6 +478,7 @@ func scanNode(sc interface{ Scan(...any) error }) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	n.RealityPrivateKey = s.crypt.decrypt(n.RealityPrivateKey)
 	n.Online = time.Now().Unix()-n.LastSeen < 60
 	return n, nil
 }
@@ -408,7 +493,7 @@ func (s *Store) ListNodes() ([]*Node, error) {
 	defer rows.Close()
 	var out []*Node
 	for rows.Next() {
-		n, err := scanNode(rows)
+		n, err := s.scanNode(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -418,11 +503,11 @@ func (s *Store) ListNodes() ([]*Node, error) {
 }
 
 func (s *Store) GetNode(id int64) (*Node, error) {
-	return scanNode(s.db.QueryRow(`SELECT `+nodeCols+` FROM nodes WHERE id=?`, id))
+	return s.scanNode(s.db.QueryRow(`SELECT `+nodeCols+` FROM nodes WHERE id=?`, id))
 }
 
 func (s *Store) GetNodeByToken(token string) (*Node, error) {
-	return scanNode(s.db.QueryRow(`SELECT `+nodeCols+` FROM nodes WHERE token=?`, token))
+	return s.scanNode(s.db.QueryRow(`SELECT `+nodeCols+` FROM nodes WHERE token=?`, token))
 }
 
 func (s *Store) CreateNode(n *Node) (int64, error) {
@@ -431,7 +516,7 @@ func (s *Store) CreateNode(n *Node) (int64, error) {
 	res, err := s.db.Exec(`INSERT INTO nodes(name,token,address,remark,created_at,reality_dest,reality_server_name,reality_private_key,reality_public_key,reality_short_id,tls_domain)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 		n.Name, n.Token, n.Address, n.Remark, time.Now().Unix(),
-		n.RealityDest, n.RealityServerName, n.RealityPrivateKey, n.RealityPublicKey, n.RealityShortID, n.TLSDomain)
+		n.RealityDest, n.RealityServerName, s.crypt.encrypt(n.RealityPrivateKey), n.RealityPublicKey, n.RealityShortID, n.TLSDomain)
 	if err != nil {
 		return 0, err
 	}
@@ -442,7 +527,7 @@ func (s *Store) UpdateNode(n *Node) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, err := s.db.Exec(`UPDATE nodes SET name=?,address=?,remark=?,reality_dest=?,reality_server_name=?,reality_private_key=?,reality_public_key=?,reality_short_id=?,tls_domain=? WHERE id=?`,
-		n.Name, n.Address, n.Remark, n.RealityDest, n.RealityServerName, n.RealityPrivateKey, n.RealityPublicKey, n.RealityShortID, n.TLSDomain, n.ID)
+		n.Name, n.Address, n.Remark, n.RealityDest, n.RealityServerName, s.crypt.encrypt(n.RealityPrivateKey), n.RealityPublicKey, n.RealityShortID, n.TLSDomain, n.ID)
 	return err
 }
 

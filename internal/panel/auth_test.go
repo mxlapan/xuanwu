@@ -36,18 +36,20 @@ func TestSessionRoundTripAndRoleIsolation(t *testing.T) {
 
 func TestValidateSecrets(t *testing.T) {
 	good := "0123456789abcdef0123456789abcdef"
+	u := "admin" // a valid admin username, so each case tests its intended check
 	cases := []struct {
 		name    string
 		cfg     Config
 		wantErr bool
 	}{
-		{"weak default pass", Config{AdminPass: "admin", JWTSecret: good}, true},
-		{"empty pass", Config{AdminPass: "", JWTSecret: good}, true},
-		{"weak override allowed", Config{AdminPass: "admin", JWTSecret: good, AllowWeakPass: true}, false},
-		{"placeholder jwt", Config{AdminPass: "Str0ng-Pass-1", JWTSecret: "replace-with-64-hex-chars"}, true},
-		{"short jwt", Config{AdminPass: "Str0ng-Pass-1", JWTSecret: "short"}, true},
-		{"valid", Config{AdminPass: "Str0ng-Pass-1", JWTSecret: good}, false},
-		{"empty jwt ok (ephemeral)", Config{AdminPass: "Str0ng-Pass-1", JWTSecret: ""}, false},
+		{"weak default pass", Config{AdminUser: u, AdminPass: "admin", JWTSecret: good}, true},
+		{"empty pass", Config{AdminUser: u, AdminPass: "", JWTSecret: good}, true},
+		{"weak override allowed", Config{AdminUser: u, AdminPass: "admin", JWTSecret: good, AllowWeakPass: true}, false},
+		{"placeholder jwt", Config{AdminUser: u, AdminPass: "Str0ng-Pass-1", JWTSecret: "replace-with-64-hex-chars"}, true},
+		{"short jwt", Config{AdminUser: u, AdminPass: "Str0ng-Pass-1", JWTSecret: "short"}, true},
+		{"valid", Config{AdminUser: u, AdminPass: "Str0ng-Pass-1", JWTSecret: good}, false},
+		{"empty jwt rejected", Config{AdminUser: u, AdminPass: "Str0ng-Pass-1", JWTSecret: ""}, true},
+		{"invalid admin user", Config{AdminUser: "a|b", AdminPass: "Str0ng-Pass-1", JWTSecret: good}, true},
 	}
 	for _, c := range cases {
 		err := validateSecrets(c.cfg)

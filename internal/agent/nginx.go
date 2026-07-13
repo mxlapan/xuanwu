@@ -72,12 +72,35 @@ http {
 }
 `
 
+// validSNI reports whether s is a bare hostname / wildcard SNI safe to embed in
+// the generated nginx.conf. It rejects anything outside the hostname charset —
+// notably whitespace, ';', '{' and newlines — so a serverName can never break
+// out of its map entry and inject nginx directives, even if the value arrives
+// from a compromised panel.
+func validSNI(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '-' || r == '_' || r == '*':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // nginxConf renders the config for a node whose REALITY inbound uses realitySNI.
-// An empty realitySNI produces a TLS-only config (no REALITY map entry).
+// An empty (or invalid) realitySNI produces a TLS-only config (no REALITY map
+// entry).
 func nginxConf(realitySNI string) string {
 	line := ""
-	if realitySNI != "" {
+	if realitySNI != "" && validSNI(realitySNI) {
 		line = "        " + realitySNI + " xray_reality_vision;\n"
+	} else if realitySNI != "" {
+		log.Printf("nginx: ignoring invalid REALITY serverName %q", realitySNI)
 	}
 	return strings.Replace(nginxTmpl, "__REALITY_MAP__", line, 1)
 }

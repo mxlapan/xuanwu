@@ -31,8 +31,8 @@ func (a *App) handleCreateAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body.Username = strings.TrimSpace(body.Username)
-	if body.Username == "" {
-		writeErr(w, 400, "username required")
+	if err := validateUsername(body.Username); err != nil {
+		writeErr(w, 400, err.Error())
 		return
 	}
 	if err := validatePasswordStrength(body.Password); err != nil {

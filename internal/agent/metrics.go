@@ -72,7 +72,9 @@ func meminfoKB(line string) int64 {
 }
 
 // xrayVersion caches the Xray version (it only changes on image upgrade) and
-// refreshes it at most hourly, since it costs a docker exec.
+// refreshes it at most hourly. It reads the container's image reference via
+// `docker inspect` and takes the tag, so it needs only inspect access — no
+// `docker exec` into the container (see the docker proxy).
 var (
 	xrayVerMu  sync.Mutex
 	xrayVerVal string
@@ -86,15 +88,34 @@ func (c *Config) xrayVersion() string {
 	if xrayVerVal != "" && time.Since(xrayVerAt) < xrayVerTTL {
 		return xrayVerVal
 	}
-	out, err := exec.Command("docker", "exec", c.XrayContainer, "xray", "version").Output()
+	out, err := exec.Command("docker", "inspect", "-f", "{{.Config.Image}}", c.XrayContainer).Output()
 	if err == nil {
-		// first line looks like: "Xray 26.6.27 (...) ..."
-		if fields := strings.Fields(strings.SplitN(string(out), "\n", 2)[0]); len(fields) >= 2 {
-			xrayVerVal = fields[1]
+		if v := imageTag(string(out)); v != "" {
+			xrayVerVal = v
 			xrayVerAt = time.Now()
 		}
 	}
 	return xrayVerVal
+}
+
+// imageTag extracts the tag from a container image reference, e.g.
+// "ghcr.io/xtls/xray-core:26.6.27" -> "26.6.27". It returns "" for an untagged
+// reference, a "latest" tag, or a digest pin (nothing meaningful to show).
+func imageTag(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if i := strings.LastIndexByte(ref, '@'); i >= 0 {
+		ref = ref[:i] // drop a digest suffix
+	}
+	slash := strings.LastIndexByte(ref, '/')
+	colon := strings.LastIndexByte(ref, ':')
+	if colon <= slash { // no tag (a ':' in the host part is a port, not a tag)
+		return ""
+	}
+	tag := ref[colon+1:]
+	if tag == "latest" {
+		return ""
+	}
+	return tag
 }
 
 // certExpiry returns the notAfter of the first cert in the PEM file, or 0.

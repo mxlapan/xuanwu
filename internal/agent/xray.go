@@ -5,10 +5,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
-
-	"xuanwu/internal/wire"
 )
 
 // writeConfig writes the config to the shared volume, overwriting in place so a
@@ -98,55 +95,4 @@ func (c *Config) applyConfig(raw json.RawMessage) error {
 		c.live.set(skel, clients)
 	}
 	return nil
-}
-
-// collectTraffic reads and resets per-user counters from Xray's stats API.
-func (c *Config) collectTraffic() []wire.TrafficItem {
-	out, err := exec.Command("docker", "exec", c.XrayContainer,
-		"xray", "api", "statsquery", "--server="+c.APIServer, "-pattern", "user>>>", "-reset").Output()
-	if err != nil {
-		log.Printf("statsquery failed: %v", err)
-		return nil
-	}
-	return parseStats(out)
-}
-
-func parseStats(out []byte) []wire.TrafficItem {
-	var resp struct {
-		Stat []struct {
-			Name  string `json:"name"`
-			Value string `json:"value"`
-		} `json:"stat"`
-	}
-	if err := json.Unmarshal(out, &resp); err != nil {
-		log.Printf("parse stats: %v", err)
-		return nil
-	}
-	type acc struct{ up, down int64 }
-	byEmail := map[string]*acc{}
-	for _, s := range resp.Stat {
-		parts := strings.Split(s.Name, ">>>") // user>>>{email}>>>traffic>>>{uplink|downlink}
-		if len(parts) != 4 || parts[0] != "user" || parts[2] != "traffic" {
-			continue
-		}
-		v, _ := strconv.ParseInt(s.Value, 10, 64)
-		if v == 0 {
-			continue
-		}
-		a := byEmail[parts[1]]
-		if a == nil {
-			a = &acc{}
-			byEmail[parts[1]] = a
-		}
-		if parts[3] == "uplink" {
-			a.up += v
-		} else if parts[3] == "downlink" {
-			a.down += v
-		}
-	}
-	items := make([]wire.TrafficItem, 0, len(byEmail))
-	for email, a := range byEmail {
-		items = append(items, wire.TrafficItem{Email: email, Up: a.up, Down: a.down})
-	}
-	return items
 }

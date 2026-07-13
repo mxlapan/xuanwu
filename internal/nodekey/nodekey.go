@@ -1,6 +1,6 @@
-// Package reality generates REALITY x25519 keypairs and short IDs, compatible
-// with `xray x25519`. Private/public keys are base64 RawURL encoded.
-package reality
+// Package nodekey generates the node's x25519 keypairs and short IDs. Private
+// and public keys are base64 RawURL encoded.
+package nodekey
 
 import (
 	"crypto/rand"

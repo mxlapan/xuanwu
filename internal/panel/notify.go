@@ -50,7 +50,7 @@ func (a *App) handleNotifySettings(w http.ResponseWriter, r *http.Request) {
 	newToken := curToken
 	if body.Token != nil {
 		newToken = strings.TrimSpace(*body.Token)
-		if err := a.store.SetSetting("telegram_token", newToken); err != nil {
+		if err := a.store.SetSecretSetting("telegram_token", newToken); err != nil {
 			writeErr(w, 500, err.Error())
 			return
 		}

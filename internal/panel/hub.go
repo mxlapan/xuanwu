@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,9 +32,23 @@ func NewHub(app *App) *Hub {
 }
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin:     func(*http.Request) bool { return true },
+	CheckOrigin:     checkWSOrigin,
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
+}
+
+// checkWSOrigin permits the node agent — a non-browser client that sends no
+// Origin header — and rejects any cross-origin browser request. Node access is
+// still gated by the registration token; pinning the origin additionally stops a
+// malicious web page from driving the node socket from a logged-in operator's
+// browser (the panel's own SPA never uses this endpoint).
+func checkWSOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	return err == nil && strings.EqualFold(u.Host, r.Host)
 }
 
 // handleWS is the HTTP handler for GET /api/node/ws.
