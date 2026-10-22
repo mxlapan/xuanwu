@@ -4,7 +4,7 @@
 # target, so a multi-arch build costs one native Go compile per architecture.
 # Unlike the agent this keeps the blanket module download: the panel is what
 # actually needs modernc.org/sqlite, and it embeds internal/panel/web.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS build
 ARG TARGETARCH
 ARG VERSION=dev
 WORKDIR /src

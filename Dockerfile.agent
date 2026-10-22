@@ -2,7 +2,7 @@
 #
 # Cross-compiles from the build host's architecture instead of emulating the
 # target, so a multi-arch build costs one native Go compile per architecture.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS build
 ARG TARGETARCH
 # Stamped into the binary and reported to the panel; CI passes the commit.
 ARG VERSION=dev
