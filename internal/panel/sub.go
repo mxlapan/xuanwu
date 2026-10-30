@@ -9,17 +9,30 @@ import (
 	"strings"
 )
 
+// realityHost is the server a REALITY link should dial: the node's public
+// Address, else its TLS domain (which resolves to the node too). It is "" — no
+// REALITY link — when REALITY is not fully configured (the node then renders no
+// REALITY inbound, see nodeconf) or when neither is set. It never falls back to
+// the REALITY serverName: that is the camouflage site (e.g. www.apple.com), so a
+// link to it makes clients handshake with the real site and time out.
+func (n *Node) realityHost() string {
+	if n.RealityDest == "" || n.RealityServerName == "" || n.RealityPublicKey == "" {
+		return ""
+	}
+	if n.Address != "" {
+		return n.Address
+	}
+	return n.TLSDomain
+}
+
 // nodeLinks returns a user's vless:// links on one node: a REALITY link (when the
-// node has REALITY keys) and/or a TLS-Vision link (when it has a TLS domain).
+// node has REALITY configured and a dialable host) and/or a TLS-Vision link (when
+// it has a TLS domain).
 func nodeLinks(u *User, n *Node) []string {
 	var links []string
 	esc := url.QueryEscape
 
-	if n.RealityPublicKey != "" && n.RealityServerName != "" {
-		host := n.Address
-		if host == "" {
-			host = n.RealityServerName
-		}
+	if host := n.realityHost(); host != "" {
 		q := url.Values{}
 		q.Set("encryption", "none")
 		q.Set("flow", "xtls-rprx-vision")
@@ -87,12 +100,8 @@ func singboxOutbounds(a *App, u *User) ([]map[string]any, []string) {
 	var outs []map[string]any
 	var names []string
 	for _, n := range a.userNodesList(u) {
-		if n.RealityPublicKey != "" && n.RealityServerName != "" {
+		if host := n.realityHost(); host != "" {
 			name := n.Name + "-reality"
-			host := n.Address
-			if host == "" {
-				host = n.RealityServerName
-			}
 			names = append(names, name)
 			outs = append(outs, map[string]any{
 				"type": "vless", "tag": name, "server": host, "server_port": 443,
@@ -167,13 +176,9 @@ func (a *App) handleSubSingbox(w http.ResponseWriter, r *http.Request) {
 // variant a node offers, plus the proxy names for proxy-group membership.
 func clashProxies(a *App, u *User) (items, names []string) {
 	for _, n := range a.userNodesList(u) {
-		if n.RealityPublicKey != "" && n.RealityServerName != "" {
+		if host := n.realityHost(); host != "" {
 			name := n.Name + "-reality"
 			names = append(names, name)
-			host := n.Address
-			if host == "" {
-				host = n.RealityServerName
-			}
 			items = append(items, fmt.Sprintf("- {name: %q, type: vless, server: %s, port: 443, uuid: %s, network: tcp, udp: true, tls: true, encryption: none, flow: xtls-rprx-vision, packet-encoding: xudp, servername: %s, client-fingerprint: chrome, skip-cert-verify: false, reality-opts: {public-key: %s, short-id: %q}}",
 				name, host, u.UUID, n.RealityServerName, n.RealityPublicKey, n.RealityShortID))
 		}

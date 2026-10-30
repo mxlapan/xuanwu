@@ -66,8 +66,8 @@ func applyStandalone(c Config, se standaloneEnv) error {
 // running and `docker exec` CLI commands work.
 func RunStandalone(c Config) error {
 	se := loadStandaloneEnv()
-	if se.realityServerName == "" || se.realityPrivateKey == "" {
-		log.Printf("warning: REALITY_SERVER_NAME / REALITY_PRIVATE_KEY not set; REALITY inbound will be invalid")
+	if se.realityDest == "" || se.realityServerName == "" || se.realityPrivateKey == "" {
+		log.Printf("warning: REALITY_DEST / REALITY_SERVER_NAME / REALITY_PRIVATE_KEY not all set; REALITY inbound disabled")
 	}
 	if err := applyStandalone(c, se); err != nil {
 		return err
@@ -160,11 +160,10 @@ func cliListUsers(se standaloneEnv) error {
 // shareLinks builds the vless:// links for a standalone user.
 func shareLinks(se standaloneEnv, u localUser) []string {
 	var links []string
-	if se.realityPublicKey != "" && se.realityServerName != "" {
-		host := se.address
-		if host == "" {
-			host = se.realityServerName
-		}
+	// The link dials ADDRESS (which defaults to DOMAIN), never the REALITY
+	// serverName: that is the camouflage site, so clients would handshake with it
+	// and time out. Without REALITY_DEST no REALITY inbound exists (see nodeconf).
+	if host := se.address; host != "" && se.realityDest != "" && se.realityPublicKey != "" && se.realityServerName != "" {
 		q := url.Values{}
 		q.Set("encryption", "none")
 		q.Set("flow", "xtls-rprx-vision")

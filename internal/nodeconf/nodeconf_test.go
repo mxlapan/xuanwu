@@ -4,7 +4,7 @@ import "testing"
 
 func TestBuildInboundsAndClients(t *testing.T) {
 	cfg := Build(
-		NodeParams{RealityServerName: "sni.example", RealityPrivateKey: "pk", RealityShortID: "sid", TLSDomain: "tls.example"},
+		NodeParams{RealityDest: "sni.example:443", RealityServerName: "sni.example", RealityPrivateKey: "pk", RealityShortID: "sid", TLSDomain: "tls.example"},
 		[]Client{{UUID: "uuid-1", Email: "alice"}},
 	)
 	inbounds, ok := cfg["inbounds"].([]any)
@@ -43,6 +43,29 @@ func TestBuildOmitsTLSWithoutDomain(t *testing.T) {
 	for _, ib := range cfg["inbounds"].([]any) {
 		if tag, _ := ib.(map[string]any)["tag"].(string); tag == "vless-xtls-vision" {
 			t.Fatal("TLS-Vision inbound present without a TLS domain")
+		}
+	}
+}
+
+// A node with no REALITY settings (TLS-only) must not render the REALITY
+// inbound: Xray 26.10 refuses an empty target, and that failed start would take
+// the TLS inbound down with it.
+func TestBuildOmitsRealityWhenUnset(t *testing.T) {
+	for name, p := range map[string]NodeParams{
+		"none":      {TLSDomain: "tls.example"},
+		"no target": {RealityServerName: "sni.example", RealityPrivateKey: "pk", TLSDomain: "tls.example"},
+		"no key":    {RealityDest: "sni.example:443", RealityServerName: "sni.example", TLSDomain: "tls.example"},
+	} {
+		tags := map[string]bool{}
+		for _, ib := range Build(p, nil)["inbounds"].([]any) {
+			tag, _ := ib.(map[string]any)["tag"].(string)
+			tags[tag] = true
+		}
+		if tags["vless-reality-vision"] {
+			t.Errorf("%s: REALITY inbound present without full REALITY settings", name)
+		}
+		if !tags["vless-xtls-vision"] {
+			t.Errorf("%s: TLS inbound missing", name)
 		}
 	}
 }

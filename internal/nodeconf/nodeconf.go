@@ -21,8 +21,17 @@ type NodeParams struct {
 	TLSDomain string
 }
 
+// hasReality reports whether the REALITY inbound has what it needs to build.
+// Xray 26.10 refuses to start on an empty target (older cores tolerated it), and
+// a failed start takes the TLS inbound down with it — so a node without REALITY
+// settings must omit the inbound rather than render a broken one.
+func (p NodeParams) hasReality() bool {
+	return p.RealityDest != "" && p.RealityServerName != "" && p.RealityPrivateKey != ""
+}
+
 // Build returns the Xray config: an API/stats inbound, a REALITY-Vision inbound
-// (:10443) and, only when p.TLSDomain is set, a TLS-Vision inbound (:10444).
+// (:10443) only when REALITY is configured (see p.hasReality), and a TLS-Vision
+// inbound (:10444) only when p.TLSDomain is set.
 func Build(p NodeParams, clients []Client) map[string]any {
 	list := make([]any, 0, len(clients))
 	for _, c := range clients {
@@ -114,7 +123,9 @@ func Build(p NodeParams, clients []Client) map[string]any {
 	if p.TLSDomain != "" {
 		inbounds = append(inbounds, tlsInbound)
 	}
-	inbounds = append(inbounds, realityInbound)
+	if p.hasReality() {
+		inbounds = append(inbounds, realityInbound)
+	}
 
 	return map[string]any{
 		"log": map[string]any{
