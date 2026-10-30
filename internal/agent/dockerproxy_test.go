@@ -42,13 +42,13 @@ func TestDockerProxyAllow(t *testing.T) {
 
 func TestImageTag(t *testing.T) {
 	cases := map[string]string{
-		"ghcr.io/xtls/xray-core:26.6.27\n": "26.6.27",
-		"nginx:1.30.3-alpine":              "1.30.3-alpine",
-		"localhost:5000/foo:v2":            "v2",
-		"ghcr.io/xtls/xray-core:latest":    "", // uninformative
-		"ghcr.io/xtls/xray-core":           "", // no tag
-		"localhost:5000/foo":               "", // ':' is a registry port, not a tag
-		"foo@sha256:abc123":                "", // digest pin
+		"ghcr.io/xtls/xray-core:26.10.29\n": "26.10.29",
+		"nginx:1.30.6-alpine":               "1.30.6-alpine",
+		"localhost:5000/foo:v2":             "v2",
+		"ghcr.io/xtls/xray-core:latest":     "", // uninformative
+		"ghcr.io/xtls/xray-core":            "", // no tag
+		"localhost:5000/foo":                "", // ':' is a registry port, not a tag
+		"foo@sha256:abc123":                 "", // digest pin
 	}
 	for ref, want := range cases {
 		if got := imageTag(ref); got != want {

@@ -122,6 +122,6 @@ a day per node and buried everything else in `./deploy.sh logs node`.
 |---|---|
 | `AGENT_IMAGE` | `ghcr.io/mxlapan/xuanwu-agent:latest` |
 | `PANEL_IMAGE` | `ghcr.io/mxlapan/xuanwu-panel:latest` |
-| `XRAY_IMAGE` | `ghcr.io/xtls/xray-core:26.6.27` |
-| `NGINX_IMAGE` | `nginx:1.30.3-alpine` |
+| `XRAY_IMAGE` | `ghcr.io/xtls/xray-core:26.10.29` |
+| `NGINX_IMAGE` | `nginx:1.30.6-alpine` |
 | `ACME_IMAGE` | `neilpang/acme.sh:latest` |

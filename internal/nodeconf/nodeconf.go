@@ -141,7 +141,8 @@ func Build(p NodeParams, clients []Client) map[string]any {
 		},
 		"inbounds": inbounds,
 		"outbounds": []any{
-			map[string]any{"tag": "direct", "protocol": "freedom", "settings": map[string]any{"domainStrategy": "UseIPv4"}},
+			// domainStrategy lives in sockopt: Xray 26.10 deprecated freedom.settings.domainStrategy.
+			map[string]any{"tag": "direct", "protocol": "freedom", "streamSettings": map[string]any{"sockopt": map[string]any{"domainStrategy": "UseIPv4"}}},
 			map[string]any{"tag": "block", "protocol": "blackhole"},
 		},
 		"routing": map[string]any{

@@ -3,7 +3,7 @@
 #   MODE=standalone  agent manages users locally with no panel (needs REALITY_*)
 services:
   xray:
-    image: ${XRAY_IMAGE:-ghcr.io/xtls/xray-core:26.6.27}
+    image: ${XRAY_IMAGE:-ghcr.io/xtls/xray-core:26.10.29}
     container_name: xray
     restart: always
     user: "0:0"
@@ -25,7 +25,7 @@ services:
       start_period: 10s
 
   nginx:
-    image: ${NGINX_IMAGE:-nginx:1.30.3-alpine}
+    image: ${NGINX_IMAGE:-nginx:1.30.6-alpine}
     container_name: nginx-edge
     restart: always
     ports: ["443:443"]

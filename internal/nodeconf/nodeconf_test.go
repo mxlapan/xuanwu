@@ -46,3 +46,24 @@ func TestBuildOmitsTLSWithoutDomain(t *testing.T) {
 		}
 	}
 }
+
+// Xray 26.10 deprecated freedom.settings.domainStrategy (slated for removal);
+// the direct outbound must set it via streamSettings.sockopt instead.
+func TestBuildDirectOutboundUsesSockopt(t *testing.T) {
+	cfg := Build(NodeParams{RealityServerName: "sni.example", RealityPrivateKey: "pk"}, nil)
+	for _, ob := range cfg["outbounds"].([]any) {
+		m := ob.(map[string]any)
+		if m["tag"] != "direct" {
+			continue
+		}
+		if _, ok := m["settings"]; ok {
+			t.Fatalf("direct outbound still sets deprecated settings: %v", m["settings"])
+		}
+		so := m["streamSettings"].(map[string]any)["sockopt"].(map[string]any)
+		if so["domainStrategy"] != "UseIPv4" {
+			t.Fatalf("sockopt.domainStrategy = %v, want UseIPv4", so["domainStrategy"])
+		}
+		return
+	}
+	t.Fatal("no direct outbound")
+}

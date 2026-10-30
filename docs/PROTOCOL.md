@@ -19,7 +19,7 @@ field (see `internal/wire`).
     "load_avg": 0.21, "mem_used_pct": 30, "mem_total": 12483125248, "mem_used": 3758096384,
     "cpu_used_pct": 17, "cpu_cores": 2, "cpu_model": "Neoverse-N1",
     "disk_total": 155989377024, "disk_used": 63501271040, "host_uptime": 2268000,
-    "xray_version": "26.6.27", "cert_expiry": 1815317059, "uptime": 1972
+    "xray_version": "26.10.29", "cert_expiry": 1815317059, "uptime": 1972
 } }
 
 // traffic batch; seq correlates with the panel's ack (see Durability)

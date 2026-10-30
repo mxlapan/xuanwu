@@ -2,7 +2,7 @@
 #
 # Cross-compiles from the build host's architecture instead of emulating the
 # target, so a multi-arch build costs one native Go compile per architecture.
-FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS build
 ARG TARGETARCH
 # Stamped into the binary and reported to the panel; CI passes the commit.
 ARG VERSION=dev
@@ -18,7 +18,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
 	-ldflags "-s -w -X xuanwu/internal/agent.Version=$VERSION" -o /agent ./cmd/agent
 
 # runtime needs docker CLI to restart xray and run statsquery
-FROM alpine:3.22
+FROM alpine:3.24
 RUN apk add --no-cache docker-cli
 COPY --from=build /agent /usr/local/bin/agent
 ENTRYPOINT ["/usr/local/bin/agent"]

@@ -17,7 +17,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-XRAY_IMAGE="${XRAY_IMAGE:-ghcr.io/xtls/xray-core:26.6.27}"
+XRAY_IMAGE="${XRAY_IMAGE:-ghcr.io/xtls/xray-core:26.10.29}"
 
 dc() { docker compose "$@"; }
 

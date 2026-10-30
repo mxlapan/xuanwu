@@ -300,7 +300,7 @@ func (c *Config) xrayVersion() string {
 }
 
 // imageTag extracts the tag from a container image reference, e.g.
-// "ghcr.io/xtls/xray-core:26.6.27" -> "26.6.27". It returns "" for an untagged
+// "ghcr.io/xtls/xray-core:26.10.29" -> "26.10.29". It returns "" for an untagged
 // reference, a "latest" tag, or a digest pin (nothing meaningful to show).
 func imageTag(ref string) string {
 	ref = strings.TrimSpace(ref)

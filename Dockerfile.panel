@@ -4,7 +4,7 @@
 # target, so a multi-arch build costs one native Go compile per architecture.
 # Unlike the agent this keeps the blanket module download: the panel is what
 # actually needs modernc.org/sqlite, and it embeds internal/panel/web.
-FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine AS build
 ARG TARGETARCH
 ARG VERSION=dev
 WORKDIR /src
@@ -15,7 +15,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH \
 	go build -buildvcs=false -trimpath \
 	-ldflags "-s -w -X xuanwu/internal/panel.Version=$VERSION" -o /panel ./cmd/panel
 
-FROM alpine:3.22
+FROM alpine:3.24
 RUN apk add --no-cache wget && mkdir -p /data
 COPY --from=build /panel /usr/local/bin/panel
 # Runs as root so a host bind-mounted ./data is writable regardless of its owner.
