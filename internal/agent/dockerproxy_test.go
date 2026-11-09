@@ -42,7 +42,7 @@ func TestDockerProxyAllow(t *testing.T) {
 
 func TestImageTag(t *testing.T) {
 	cases := map[string]string{
-		"ghcr.io/xtls/xray-core:26.10.29\n": "26.10.29",
+		"ghcr.io/xtls/xray-core:26.10.31\n": "26.10.31",
 		"nginx:1.30.6-alpine":               "1.30.6-alpine",
 		"localhost:5000/foo:v2":             "v2",
 		"ghcr.io/xtls/xray-core:latest":     "", // uninformative

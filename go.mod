@@ -6,7 +6,7 @@ toolchain go1.27.3
 
 require (
 	github.com/gorilla/websocket v1.5.3
-	github.com/xtls/xray-core v1.260327.1-0.20261029083850-0afec66085a8
+	github.com/xtls/xray-core v1.260327.1-0.20261031132019-a4a3dff5b20c
 	golang.org/x/crypto v0.58.0
 	google.golang.org/grpc v1.85.0
 	modernc.org/sqlite v1.61.0
@@ -45,3 +45,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+godebug multipathtcp=0
